@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "graph.h"
+#include "dijkstra.h"
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -28,8 +29,7 @@ int main(int argc, char* argv[]) {
     }
     int source, destination;
     fscanf(file, "%d %d", &source,&destination);
-    printf("%d %d %d %d\n", node_num, edge_num, source, destination);
-
+    dijkstra(g, source, destination);
     fclose(file);
     free_graph(g);
     return 0;
