@@ -13,7 +13,8 @@ typedef struct graph {
 }graph;
 
 graph* create_graph(int node_num);
-void add_edge(graph* graph, int src, int dest, int weight);
+/* Returns 0 on success, -1 if allocation fails. */
+int add_edge(graph* graph, int src, int dest, int weight);
 void free_graph(graph* graph);
 
 #endif
