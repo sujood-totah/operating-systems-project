@@ -31,37 +31,62 @@ void draw_arrow(Vector2 start, Vector2 end) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("ERROR: Wrong number of arguments\n");
+        printf("Invalid input\n");
         return 1;
     }
 
     FILE* file = fopen(argv[1], "r");
     if (file == NULL) {
-        perror("error opening file");
+        printf("Invalid input\n");
         return 1;
     }
 
-    int node_num;
-    int edge_num;
+    int node_num, edge_num;
 
-    fscanf(file, "%d %d", &node_num, &edge_num);
-    if (node_num > 15) {
-       printf("ERROR: Maximum number of nodes is 15\n");
-       fclose(file);
-       return 1;
+    if (fscanf(file, "%d %d", &node_num, &edge_num) != 2 ||
+        node_num <= 0 || node_num > 15 || edge_num < 0) {
+        printf("Invalid input\n");
+        fclose(file);
+        return 1;
     }
+
     graph* g = create_graph(node_num);
+    if (g == NULL) {
+        printf("Invalid input\n");
+        fclose(file);
+        return 1;
+    }
 
     for (int i = 0; i < edge_num; i++) {
         int src, dest, weight;
-        fscanf(file, "%d %d %d", &src, &dest, &weight);
+
+        if (fscanf(file, "%d %d %d", &src, &dest, &weight) != 3 ||
+            src < 0 || dest < 0 || weight < 0 ||
+            src >= node_num || dest >= node_num) {
+            printf("Invalid input\n");
+            fclose(file);
+            free_graph(g);
+            return 1;
+        }
+
         add_edge(g, src, dest, weight);
     }
 
     int source, destination;
-    fscanf(file, "%d %d", &source, &destination);
+
+    if (fscanf(file, "%d %d", &source, &destination) != 2 ||
+        source < 0 || destination < 0 ||
+        source >= node_num || destination >= node_num) {
+        printf("Invalid input\n");
+        fclose(file);
+        free_graph(g);
+        return 1;
+    }
 
     fclose(file);
+
+    (void)source;
+    (void)destination;
 
     InitWindow(WIDTH, HEIGHT, "Graph GUI");
 
@@ -101,8 +126,8 @@ int main(int argc, char *argv[]) {
 
                 draw_arrow(start, end);
 
-                int midX = (start.x + end.x) / 2;
-                int midY = (start.y + end.y) / 2;
+                int midX = (int)((start.x + end.x) / 2);
+                int midY = (int)((start.y + end.y) / 2);
 
                 char weightText[20];
                 sprintf(weightText, "%d", weight);
@@ -118,7 +143,11 @@ int main(int argc, char *argv[]) {
             char nodeText[10];
             sprintf(nodeText, "%d", i);
 
-            DrawText(nodeText, positions[i].x - 6, positions[i].y - 10, 20, WHITE);
+            DrawText(nodeText,
+                     (int)(positions[i].x - 6),
+                     (int)(positions[i].y - 10),
+                     20,
+                     WHITE);
         }
 
         EndDrawing();
