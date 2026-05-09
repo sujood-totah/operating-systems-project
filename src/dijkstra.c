@@ -52,7 +52,7 @@ void dijkstra(graph* g, int src, int dest) {
             int neighbor = pointer->dest;
             int weight = pointer->weight;
             if (weight < 0) {
-                printf("Invalid input\n");
+                printf("Negative weights are not allowed.\n");
                 free(dist);
                 free(visited);
                 free(prev);
