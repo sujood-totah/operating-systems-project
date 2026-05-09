@@ -10,7 +10,7 @@
 #define NODE_RADIUS 25
 #define GUI_MAX_NODES 15
 
-void draw_arrow(Vector2 start, Vector2 end) {
+ void draw_arrow(Vector2 start, Vector2 end) {
     DrawLineEx(start, end, 3, BLACK);
 
     float angle = atan2f(end.y - start.y, end.x - start.x);
