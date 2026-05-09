@@ -3,10 +3,12 @@
 #include <stdlib.h>
 #include <math.h>
 #include "graph.h"
+#include "graph_io.h"
 
 #define WIDTH 800
 #define HEIGHT 600
 #define NODE_RADIUS 25
+#define GUI_MAX_NODES 15
 
 void draw_arrow(Vector2 start, Vector2 end) {
     DrawLineEx(start, end, 3, BLACK);
@@ -35,62 +37,28 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    FILE* file = fopen(argv[1], "r");
-    if (file == NULL) {
+    graph_load_data data;
+    graph_load_result r = graph_load_from_path(argv[1], &data, GUI_MAX_NODES);
+
+    if (r == GRAPH_LOAD_NEGATIVE_WEIGHT) {
+        printf("Negative weights are not allowed.\n");
+        return 1;
+    }
+    if (r != GRAPH_LOAD_OK) {
         printf("Invalid input\n");
         return 1;
     }
 
-    int node_num, edge_num;
+    graph* g = data.g;
+    const int node_num = g->node_num;
 
-    if (fscanf(file, "%d %d", &node_num, &edge_num) != 2 ||
-        node_num <= 0 || node_num > 15 || edge_num < 0) {
-        printf("Invalid input\n");
-        fclose(file);
-        return 1;
-    }
-
-    graph* g = create_graph(node_num);
-    if (g == NULL) {
-        printf("Invalid input\n");
-        fclose(file);
-        return 1;
-    }
-
-    for (int i = 0; i < edge_num; i++) {
-        int src, dest, weight;
-
-        if (fscanf(file, "%d %d %d", &src, &dest, &weight) != 3 ||
-            src < 0 || dest < 0 || weight < 0 ||
-            src >= node_num || dest >= node_num) {
-            printf("Invalid input\n");
-            fclose(file);
-            free_graph(g);
-            return 1;
-        }
-
-        add_edge(g, src, dest, weight);
-    }
-
-    int source, destination;
-
-    if (fscanf(file, "%d %d", &source, &destination) != 2 ||
-        source < 0 || destination < 0 ||
-        source >= node_num || destination >= node_num) {
-        printf("Invalid input\n");
-        fclose(file);
-        free_graph(g);
-        return 1;
-    }
-
-    fclose(file);
-
-    (void)source;
-    (void)destination;
+    (void)data.source;
+    (void)data.destination;
 
     InitWindow(WIDTH, HEIGHT, "Graph GUI");
+    SetTargetFPS(60);
 
-    Vector2 positions[15];
+    Vector2 positions[GUI_MAX_NODES];
 
     float centerX = WIDTH / 2.0f;
     float centerY = HEIGHT / 2.0f;
@@ -129,9 +97,11 @@ int main(int argc, char *argv[]) {
                 int midX = (int)((start.x + end.x) / 2);
                 int midY = (int)((start.y + end.y) / 2);
 
-                char weightText[20];
-                sprintf(weightText, "%d", weight);
-                DrawText(weightText, midX, midY, 20, BLUE);
+                char weightText[32];
+                const int fontSize = 20;
+                snprintf(weightText, sizeof(weightText), "%d", weight);
+                int tw = MeasureText(weightText, fontSize);
+                DrawText(weightText, midX - tw / 2, midY - fontSize / 2, fontSize, BLUE);
 
                 curr = curr->next;
             }
@@ -140,13 +110,14 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < node_num; i++) {
             DrawCircleV(positions[i], NODE_RADIUS, RED);
 
-            char nodeText[10];
-            sprintf(nodeText, "%d", i);
-
+            char nodeText[16];
+            const int fontSize = 20;
+            snprintf(nodeText, sizeof(nodeText), "%d", i);
+            int tw = MeasureText(nodeText, fontSize);
             DrawText(nodeText,
-                     (int)(positions[i].x - 6),
-                     (int)(positions[i].y - 10),
-                     20,
+                     (int)(positions[i].x - tw / 2),
+                     (int)(positions[i].y - fontSize / 2),
+                     fontSize,
                      WHITE);
         }
 
