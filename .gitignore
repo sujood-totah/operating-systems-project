@@ -1,3 +1,5 @@
 .idea/
 graph_gui
 raylib/
+sim
+dijkstra
