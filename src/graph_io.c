@@ -1,11 +1,13 @@
 #include "graph_io.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 graph_load_result graph_load_from_path(const char* path, graph_load_data* out,
                                        int max_nodes) {
     out->g = NULL;
-    out->source = 0;
-    out->destination = 0;
+    out->traveler_count = 0;
+    out->source = NULL;
+    out->destination = NULL;
 
     FILE* file = fopen(path, "r");
     if (file == NULL) {
@@ -49,18 +51,45 @@ graph_load_result graph_load_from_path(const char* path, graph_load_data* out,
             return GRAPH_LOAD_ALLOC;
         }
     }
-
-    int source, destination;
-    if (fscanf(file, "%d %d", &source, &destination) != 2 ||
-        source < 0 || destination < 0 ||
-        source >= node_num || destination >= node_num) {
+    int traveler_count;
+    if (fscanf(file, "%d", &traveler_count) != 1 || traveler_count <= 0 ) {
         fclose(file);
         free_graph(g);
         return GRAPH_LOAD_INVALID;
+    }
+
+    int* source;
+    int* destination;
+
+    source = (int*)malloc(traveler_count * sizeof(int));
+    if (source == NULL) {
+        fclose(file);
+        free_graph(g);
+        return GRAPH_LOAD_ALLOC;
+    }
+    destination = (int*)malloc(traveler_count * sizeof(int));
+    if (destination == NULL) {
+        free(out->source);
+        fclose(file);
+        free_graph(g);
+        return GRAPH_LOAD_ALLOC;
+    }
+
+    for (int i = 0; i < traveler_count; i++) {
+        if (fscanf(file, "%d %d", &source[i], &destination[i]) != 2 ||
+        source[i] < 0 || destination[i] < 0 ||
+        source[i] >= node_num || destination[i] >= node_num) {
+            free(source);
+            free(destination);
+            fclose(file);
+            free_graph(g);
+            return GRAPH_LOAD_INVALID;
         }
+    }
 
     fclose(file);
     out->g = g;
+    out->traveler_count = traveler_count;
     out->source = source;
     out->destination = destination;
     return GRAPH_LOAD_OK;

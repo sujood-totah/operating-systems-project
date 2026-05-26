@@ -62,8 +62,8 @@ int main(int argc, char* argv[]) {
 
     graph* g = data.g;
     const int node_num = g->node_num;
-    const int src = data.source;
-    const int dest = data.destination;
+    const int src = data.source[0];
+    const int dest = data.destination[0];
 
     int path[GUI_MAX_NODES];
     int path_length = 0;

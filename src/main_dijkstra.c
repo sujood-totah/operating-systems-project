@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+
 #include "graph_io.h"
 #include "dijkstra.h"
 
@@ -19,8 +21,14 @@ int main(int argc, char* argv[]) {
         printf("Invalid input\n");
         return 1;
     }
+    int traveler_count = data.traveler_count;
 
-    dijkstra(data.g, data.source, data.destination);
+
+    for (int i = 0; i < traveler_count; i++) {
+        dijkstra(data.g, data.source[i], data.destination[i]);
+    }
+    free(data.source);
+    free(data.destination);
     free_graph(data.g);
     return 0;
 }
