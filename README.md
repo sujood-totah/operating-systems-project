@@ -1,6 +1,6 @@
 # Operating Systems Project
 
-Graph traffic simulation: load a directed weighted graph from a file, compute a shortest path with **Dijkstra**, and (milestones 2–3) visualize it with **Raylib**.
+Graph traffic simulation: load a directed weighted graph from a file, compute shortest paths with **Dijkstra**, and visualize the travelers with **Raylib** across milestones 1-5.
 
 ## Team
 
@@ -33,7 +33,8 @@ Plain text, ordered as follows:
 
 1. First line: `N M` — number of vertices (`N`), number of edges (`M`).
 2. Next `M` lines: `u v w` — directed edge from `u` to `v` with non-negative integer weight `w`. Vertices are `0 … N-1`.
-3. Last line: `source dest` — start and goal vertices for Dijkstra.
+3. Next line: `T` — number of travelers.
+4. Next `T` lines: `source dest` — one source/destination pair per traveler.
 
 Example (`inputs/example1.txt`):
 
@@ -47,7 +48,10 @@ Example (`inputs/example1.txt`):
 3 4 2
 4 5 3
 2 5 10
+3
 0 5
+1 4
+2 3
 ```
 
 ---
@@ -60,7 +64,9 @@ From the repository root:
 make milestone1    # builds ./dijkstra (CLI only)
 make milestone2    # builds ./sim (GUI + graph + shortest-path animation)
 make milestone3    # same artifact as milestone2 (per assignment milestones)
-make all           # milestone1 + milestone2 + milestone3
+make milestone4    # builds ./sim for the multi-process GUI version
+make milestone5    # builds ./sim for the IPC version
+make all           # builds milestones 1-5
 make clean         # removes ./dijkstra, ./sim, and *.o
 ```
 
@@ -75,7 +81,7 @@ make clean         # removes ./dijkstra, ./sim, and *.o
 # e.g. ./dijkstra inputs/example1.txt
 ```
 
-Prints the shortest path as `v0 -> v1 -> ...` on one line, then the total distance on the next line (or `No path found` / error messages as implemented).
+Prints one shortest-path result per traveler: the path as `v0 -> v1 -> ...` on one line, then the total distance on the next line (or `No path found` / error messages as implemented).
 
 ### Milestones 2–3 — GUI (`sim`)
 
@@ -99,6 +105,37 @@ Prints the shortest path as `v0 -> v1 -> ...` on one line, then the total distan
 
 If there is **no path**, the program prints `No path found` and exits before opening the window.
 
+### Milestone 4 — multiple travelers with `fork()`
+
+```bash
+make milestone4
+./sim <graph_file>
+```
+
+- The parent process reads the full input file and computes the shortest path for each traveler before `fork()`.
+- A child process is created for every traveler and prints `[PID=...] started`, then waits until the parent terminates it.
+- The parent runs the Raylib loop and animates all travelers concurrently on the graph.
+- Each traveler is shown with a different color in the GUI.
+- When a traveler reaches the destination, the parent sends a signal to terminate that child and waits for all children before exiting.
+
+### Milestone 5 — IPC between children and parent
+
+```bash
+make milestone5
+./sim <graph_file>
+```
+
+- Each child computes its own shortest path with Dijkstra after `fork()`.
+- The chosen IPC mechanism is an anonymous `pipe` per traveler.
+- Each child reports every node arrival to the parent through its pipe.
+- The parent is the only process that prints the runtime log:
+    - `[PID=...] arrived at node X | next node: Y`
+    - `[PID=...] arrived at node X | DESTINATION`
+    - `[PID=...] finished`
+- The parent updates the GUI according to the node reports it receives from the children.
+
+`pipe` was chosen because communication is one-way (child -> parent), the message format is small and fixed, and it keeps the implementation simpler than shared memory for this milestone.
+
 ---
 
 ## Source layout (high level)
@@ -106,10 +143,12 @@ If there is **no path**, the program prints `No path found` and exits before ope
 | Component        | Role |
 |-----------------|------|
 | `src/graph.*`   | Adjacency-list graph, `add_edge`, `free_graph` |
-| `src/graph_io.*`| Load graph + `source`/`destination` from file |
+| `src/graph_io.*`| Load graph + traveler source/destination pairs from file |
 | `src/dijkstra.*`| `dijkstra()` for CLI; `dijkstra_get_path()` for GUI |
 | `src/main_dijkstra.c` | Milestone 1 entry |
 | `src/main_GUI.c`      | Raylib GUI and milestone 3 timing / controls |
+| `src/multiple_GUI.c`  | Milestone 4 parent/children GUI with `fork()` |
+| `src/main_IPC.c`      | Milestone 5 IPC-based GUI using `pipe` |
 
 ---
 
