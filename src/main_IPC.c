@@ -47,13 +47,21 @@ typedef struct {
     pid_t pid;
 } Traveler;
 
-static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
-    for (int i = 0; i < path_len - 1; i++) {
-        if (path[i] == u && path[i + 1] == v) {
-            return 1;
+static volatile sig_atomic_t child_can_run = 0;
+
+static void handle_start_signal(int signum) {
+    (void)signum;
+    child_can_run = 1;
+}
+
+static void signal_active_travelers(const Traveler* travelers,
+                                    int traveler_count,
+                                    int signal_num) {
+    for (int i = 0; i < traveler_count; i++) {
+        if (!travelers[i].finished && travelers[i].pid > 0) {
+            kill(travelers[i].pid, signal_num);
         }
     }
-    return 0;
 }
 
 static void draw_arrow_colored(Vector2 start, Vector2 end, float thick, Color lineCol,
@@ -134,7 +142,22 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < traveler_count; i++) {
         travelers[i].source = src[i];
         travelers[i].destination = dest[i];
+        travelers[i].path_length = 0;
 
+        int preview_path[GUI_MAX_NODES];
+        int preview_path_length = 0;
+        if (!dijkstra_get_path(g,
+                               src[i],
+                               dest[i],
+                               preview_path,
+                               &preview_path_length,
+                               &travelers[i].total_distance)) {
+            printf("No path found\n");
+            free(data.source);
+            free(data.destination);
+            free_graph(g);
+            return 1;
+        }
         travelers[i].position = positions[travelers[i].source];
         travelers[i].color = colors[i % 8];
 
@@ -165,6 +188,7 @@ int main(int argc, char* argv[]) {
             int child_path[GUI_MAX_NODES];
             int child_path_length = 0;
             int child_total_distance = 0;
+            struct sigaction sa;
 
             int has_path = dijkstra_get_path(
                            g,
@@ -175,30 +199,42 @@ int main(int argc, char* argv[]) {
                            &child_total_distance
                        );
             if (!has_path) {
-                printf("No path found\n");
                 close(pipes[i][1]);
                 exit(1);
             }
 
+            child_can_run = 0;
+            sigemptyset(&sa.sa_mask);
+            sa.sa_flags = 0;
+            sa.sa_handler = handle_start_signal;
+            sigaction(SIGUSR1, &sa, NULL);
+
+            while (!child_can_run) {
+                pause();
+            }
+
             Message msg;
 
-            for (int j = 0; j < travelers[i].path_length; j++) {
+            for (int j = 0; j < child_path_length; j++) {
 
                 msg.pid = getpid();
                 msg.traveler_id = i;
-                msg.current_node = travelers[i].path[j];
+                msg.current_node = child_path[j];
+                msg.total_distance = child_total_distance;
 
-                if (j == travelers[i].path_length - 1) {
+                if (j == child_path_length - 1) {
                     msg.next_node = -1;
                     msg.finished = 1;
                 } else {
-                    msg.next_node = travelers[i].path[j + 1];
+                    msg.next_node = child_path[j + 1];
                     msg.finished = 0;
                 }
 
                 write(pipes[i][1], &msg, sizeof(Message));
 
-                sleep(1);
+                if (!msg.finished) {
+                    sleep(1);
+                }
             }
 
             close(pipes[i][1]);
@@ -216,6 +252,7 @@ int main(int argc, char* argv[]) {
     SetTargetFPS(60);
     Rectangle playButton = {20, 20, 120, 40};
     int is_playing = 0;
+    int has_started = 0;
 
 
     while (!WindowShouldClose()) {
@@ -224,7 +261,17 @@ int main(int argc, char* argv[]) {
             Vector2 mouse = GetMousePosition();
 
             if (CheckCollisionPointRec(mouse, playButton)) {
-                is_playing = !is_playing;
+                if (!has_started) {
+                    signal_active_travelers(travelers, traveler_count, SIGUSR1);
+                    has_started = 1;
+                    is_playing = 1;
+                } else if (is_playing) {
+                    signal_active_travelers(travelers, traveler_count, SIGSTOP);
+                    is_playing = 0;
+                } else {
+                    signal_active_travelers(travelers, traveler_count, SIGCONT);
+                    is_playing = 1;
+                }
             }
         }
 
@@ -242,6 +289,7 @@ int main(int argc, char* argv[]) {
 
                 travelers[msg.traveler_id].position =
                     positions[msg.current_node];
+                travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.finished) {
 
@@ -417,6 +465,7 @@ int main(int argc, char* argv[]) {
     CloseWindow();
     for (int i = 0; i < traveler_count; i++) {
         if (!travelers[i].finished) {
+            kill(travelers[i].pid, SIGCONT);
             kill(travelers[i].pid, SIGTERM);
         }
     }
@@ -425,6 +474,8 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < traveler_count; i++) {
         waitpid(travelers[i].pid, NULL, 0);
     }
+    free(data.source);
+    free(data.destination);
     free_graph(g);
 
     return 0;
