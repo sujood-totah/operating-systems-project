@@ -107,9 +107,11 @@ void dijkstra(graph* g, int src, int dest) {
 
 }
 
+
 int dijkstra_get_path(graph* g, int src, int dest, int* path, int* path_length, int* total_distance) {
     if (g == NULL || path == NULL || path_length == NULL || total_distance == NULL ||
-        src < 0 || dest < 0 || src >= g->node_num || dest >= g->node_num) {
+    src < 0 || dest < 0 ||
+    src >= g->node_num || dest >= g->node_num) {
         return 0;
     }
 

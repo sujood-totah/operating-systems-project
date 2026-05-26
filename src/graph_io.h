@@ -12,8 +12,9 @@ typedef enum {
 
 typedef struct {
     graph* g;
-    int source;
-    int destination;
+    int traveler_count;
+    int* source;
+    int* destination;
 } graph_load_data;
 
 /*
