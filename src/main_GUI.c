@@ -88,15 +88,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    printf("Shortest path: ");
-    for (int i = 0; i < path_length; i++) {
-        printf("%d", path[i]);
-        if (i < path_length - 1) {
-            printf(" -> ");
-        }
-    }
-    printf("\nDistance: %d\n", total_distance);
-
     InitWindow(WIDTH, HEIGHT, "Graph GUI");
     SetTargetFPS(60);
 
@@ -114,7 +105,8 @@ int main(int argc, char* argv[]) {
 
     int is_playing = 0;
     int current_edge_index = 0;
-    float edge_elapsed = 0.0f;
+    int current_step = 0;
+    float step_timer = 0.0f;
     float wait_timer = 0.0f;
     int is_waiting = 0;
     /* Trivial path: already at destination — show completion state immediately */
@@ -135,7 +127,8 @@ int main(int argc, char* argv[]) {
                 } else if (finished) {
                     finished = 0;
                     current_edge_index = 0;
-                    edge_elapsed = 0.0f;
+                    current_step = 0;
+                    step_timer = 0.0f;
                     wait_timer = 0.0f;
                     is_waiting = 0;
                     is_playing = 1;
@@ -153,33 +146,38 @@ int main(int argc, char* argv[]) {
                 if (wait_timer >= NODE_WAIT_SEC) {
                     wait_timer = 0.0f;
                     is_waiting = 0;
-                    edge_elapsed = 0.0f;
+                    current_step = 0;
+                    step_timer = 0.0f;
                 }
             } else {
                 int from = path[current_edge_index];
                 int to = path[current_edge_index + 1];
                 int weight = edge_weight_between(g, from, to);
-                float edge_duration = (float)weight * EDGE_STEP_SEC;
 
-                edge_elapsed += delta;
+                step_timer += delta;
 
-                if (edge_elapsed >= edge_duration) {
-                    entity_position = positions[to];
-                    edge_elapsed = 0.0f;
-                    current_edge_index++;
+                if (step_timer >= EDGE_STEP_SEC) {
+                    step_timer = 0.0f;
+                    current_step++;
 
-                    if (current_edge_index >= path_length - 1) {
-                        finished = 1;
-                        is_playing = 0;
+                    if (current_step >= weight) {
+                        entity_position = positions[to];
+                        current_step = 0;
+                        current_edge_index++;
+
+                        if (current_edge_index >= path_length - 1) {
+                            finished = 1;
+                            is_playing = 0;
+                        } else {
+                            is_waiting = 1;
+                        }
                     } else {
-                        is_waiting = 1;
+                        float t = (float)current_step / (float)weight;
+                        entity_position.x =
+                            positions[from].x + t * (positions[to].x - positions[from].x);
+                        entity_position.y =
+                            positions[from].y + t * (positions[to].y - positions[from].y);
                     }
-                } else {
-                    float t = edge_elapsed / edge_duration;
-                    entity_position.x =
-                        positions[from].x + t * (positions[to].x - positions[from].x);
-                    entity_position.y =
-                        positions[from].y + t * (positions[to].y - positions[from].y);
                 }
             }
         }
