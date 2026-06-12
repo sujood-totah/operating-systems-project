@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
     graph_load_result r = graph_load_from_path(argv[1], &data, 0);
 
     if (r == GRAPH_LOAD_NEGATIVE_WEIGHT) {
-        printf("Negative weights are not allowed.\n");
+        printf("Invalid input\n");
         return 1;
     }
     if (r != GRAPH_LOAD_OK) {
