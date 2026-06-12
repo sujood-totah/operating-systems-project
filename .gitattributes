@@ -1,0 +1,3 @@
+*.sh text eol=lf
+tests/expected/*.out text eol=lf
+inputs/tests/*.txt text eol=lf

@@ -152,6 +152,34 @@ make milestone5
 
 ---
 
+## How to test milestones 1–5
+
+From the repository root on **Linux** (reference platform):
+
+```bash
+bash tests/run_tests.sh
+```
+
+The script will:
+
+1. `make clean`, then build `milestone1` … `milestone5`
+2. Compare milestone 1 stdout to `tests/expected/*.out`
+3. Smoke-launch milestones 2–3 under `xvfb-run` (if installed) with a short timeout
+4. Run milestone 4 with a timeout and check for `[PID=…] started` from each child
+5. Run milestone 5 with `xvfb-run` + `xdotool` (if installed) to click **PLAY** and verify IPC log lines
+
+Logs are written to `tests/logs/`. For manual GUI checks (colors, timing, buttons), use **`tests/CHECKLIST.md`**. Test inputs and which requirement each file covers are documented in **`inputs/tests/README.md`**.
+
+Optional packages for full automated GUI/IPC checks:
+
+```bash
+sudo apt install xvfb xdotool
+```
+
+On Windows, run the script inside **WSL** with the same Linux packages (`build-essential`, `libraylib-dev`, `xvfb`, `xdotool`).
+
+---
+
 ## Troubleshooting
 
 - **`undefined reference` when linking `sim`:** install `libraylib-dev` (or your distro’s Raylib `-dev` package). Compare with `pkg-config --libs raylib` if your distro uses different flags.

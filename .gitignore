@@ -3,3 +3,4 @@ graph_gui
 raylib/
 sim
 dijkstra
+tests/logs/
