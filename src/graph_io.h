@@ -25,4 +25,8 @@ typedef struct {
 graph_load_result graph_load_from_path(const char* path, graph_load_data* out,
                                        int max_nodes);
 
+/* Milestone 1: last line is "source dest" (no traveler-count line). */
+graph_load_result graph_load_milestone1_from_path(const char* path,
+                                                  graph_load_data* out);
+
 #endif

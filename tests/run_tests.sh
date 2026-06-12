@@ -123,12 +123,12 @@ run_m1_compare "no_path" "$INPUT_DIR/m1_no_path.txt" \
 # Requirement: source == destination → node then 0
 run_m1_compare "same_source_dest" "$INPUT_DIR/m1_same_source_dest.txt" \
     "$EXPECTED_DIR/m1_same_source_dest.out"
-# Requirement: negative weights → error
+# Requirement: negative weights → erro
 run_m1_compare "negative_weight" "$INPUT_DIR/m1_negative_weight.txt" \
     "$EXPECTED_DIR/m1_negative_weight.out"
-# Requirement: multiple travelers in one file
-run_m1_compare "multi_traveler" "$INPUT_DIR/m1_multi_traveler.txt" \
-    "$EXPECTED_DIR/m1_multi_traveler.out"
+# Requirement: course-style input (last line source dest, no traveler count)
+run_m1_compare "example1_path" "$INPUT_DIR/m1_example1_path.txt" \
+    "$EXPECTED_DIR/m1_example1_path.out"
 
 # Requirement: missing argument → Invalid input
 if [ -x ./dijkstra ]; then

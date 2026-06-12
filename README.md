@@ -33,8 +33,10 @@ Plain text, ordered as follows:
 
 1. First line: `N M` — number of vertices (`N`), number of edges (`M`).
 2. Next `M` lines: `u v w` — directed edge from `u` to `v` with non-negative integer weight `w`. Vertices are `0 … N-1`.
-3. Next line: `T` — number of travelers.
+3. Next line: `T` — number of travelers (milestones 2–5).
 4. Next `T` lines: `source dest` — one source/destination pair per traveler.
+
+**Milestone 1 only:** step 3 is omitted; the file ends with a single `source dest` line.
 
 Example (`inputs/example1.txt`):
 

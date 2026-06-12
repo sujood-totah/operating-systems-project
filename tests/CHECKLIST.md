@@ -14,7 +14,7 @@ Use `bash tests/run_tests.sh` from the repo root for automated checks. Use this 
 | 1.4 | Same source/dest | `inputs/tests/m1_same_source_dest.txt` | `2` then `0` |
 | 1.5 | Negative weight | `inputs/tests/m1_negative_weight.txt` | `Invalid input`, exit 1 |
 | 1.6 | Missing file arg | `./dijkstra` | `Invalid input`, exit 1 |
-| 1.7 | Multiple travelers | `inputs/tests/m1_multi_traveler.txt` | Two path/distance blocks (see `tests/expected/`) |
+| 1.7 | Course autograder graph | `inputs/tests/m1_example1_path.txt` | `0 -> 2 -> 5` then `12` |
 
 ---
 
