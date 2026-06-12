@@ -10,6 +10,17 @@
 #define HEIGHT 600
 #define NODE_RADIUS 25
 #define GUI_MAX_NODES 15
+#define EDGE_STEP_SEC 0.3f
+#define NODE_WAIT_SEC 1.0f
+
+static int edge_weight_between(graph* g, int u, int v) {
+    for (edge* e = g->adjacency_list[u]; e != NULL; e = e->next) {
+        if (e->dest == v) {
+            return e->weight;
+        }
+    }
+    return 1;
+}
 
 static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
     for (int i = 0; i < path_len - 1; i++) {
@@ -52,7 +63,7 @@ int main(int argc, char* argv[]) {
     graph_load_result r = graph_load_from_path(argv[1], &data, GUI_MAX_NODES);
 
     if (r == GRAPH_LOAD_NEGATIVE_WEIGHT) {
-        printf("Negative weights are not allowed.\n");
+        printf("Invalid input\n");
         return 1;
     }
     if (r != GRAPH_LOAD_OK) {
@@ -141,27 +152,20 @@ int main(int argc, char* argv[]) {
             if (is_waiting) {
                 wait_timer += delta;
 
-                if (wait_timer >= 1.0f) {
+                if (wait_timer >= NODE_WAIT_SEC) {
                     wait_timer = 0.0f;
                     is_waiting = 0;
+                    current_step = 0;
+                    step_timer = 0.0f;
                 }
             } else {
                 int from = path[current_edge_index];
                 int to = path[current_edge_index + 1];
-
-                int weight = 1;
-                edge* curr = g->adjacency_list[from];
-                while (curr != NULL) {
-                    if (curr->dest == to) {
-                        weight = curr->weight;
-                        break;
-                    }
-                    curr = curr->next;
-                }
+                int weight = edge_weight_between(g, from, to);
 
                 step_timer += delta;
 
-                if (step_timer >= 0.3f) {
+                if (step_timer >= EDGE_STEP_SEC) {
                     step_timer = 0.0f;
                     current_step++;
 
