@@ -1,1 +1,0 @@
-gcc -Wall -Wextra -std=c99 -g src/main_dijkstra.c src/graph.c src/graph_io.c src/dijkstra.c -o dijkstra

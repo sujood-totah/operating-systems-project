@@ -1,6 +1,0 @@
-gcc -Wall -Wextra -std=c99 -g src/main_IPC.c src/graph.c src/graph_io.c src/dijkstra.c -o sim -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
-src/main_IPC.c:2:10: fatal error: raylib.h: No such file or directory
-    2 | #include "raylib.h"
-      |          ^~~~~~~~~~
-compilation terminated.
-make: *** [Makefile:21: milestone5] Error 1
