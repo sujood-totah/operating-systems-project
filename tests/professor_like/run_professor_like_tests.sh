@@ -108,6 +108,40 @@ log_crash_in_file() {
     grep -qiE 'Segmentation fault|Aborted|fatal error|core dumped|stack smashing' "$log_file"
 }
 
+run_sim_headless_unbuffered() {
+    local timeout_sec="$1"
+    local input_file="$2"
+    local log_file="$3"
+
+    local sim_cmd=(./sim "$input_file")
+    if have_cmd stdbuf; then
+        sim_cmd=(stdbuf -oL -eL ./sim "$input_file")
+    fi
+
+    if have_cmd timeout; then
+        local run=(timeout "$timeout_sec")
+    else
+        local run=()
+    fi
+
+    if have_cmd xvfb-run; then
+        "${run[@]}" xvfb-run -a "${sim_cmd[@]}" >"$log_file" 2>&1
+    else
+        "${run[@]}" "${sim_cmd[@]}" >"$log_file" 2>&1
+    fi
+}
+
+count_started_lines() {
+    local log_file="$1"
+    if [ ! -f "$log_file" ]; then
+        printf '0'
+        return
+    fi
+    local n
+    n=$(grep -c '\[PID=[0-9]*\] started' "$log_file" 2>/dev/null)
+    printf '%s' "${n:-0}"
+}
+
 # ---------------------------------------------------------------------------
 log "=== General repository checks ==="
 
@@ -303,7 +337,11 @@ if [ -x ./sim ]; then
     rc=$?
     set -e
     if smoke_ok_rc "$rc" && ! log_crash_in_file "$logfile"; then
-        pass "m2 smoke (xvfb/timeout 7s, no crash)"
+        if grep -q 'No path found' "$logfile"; then
+            fail "m2 smoke input has no path (see $logfile)"
+        else
+            pass "m2 smoke (xvfb/timeout 7s, no crash)"
+        fi
     else
         fail "m2 smoke (exit $rc; see $logfile)"
     fi
@@ -344,16 +382,15 @@ fi
 
 if [ -x ./sim ]; then
     logfile="$LOG_DIR/m4_multi_traveler.log"
-    traveler_count=$(awk 'NR>1 && prev_edges>0 {print; exit} {if(NF==2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && prev_edges==0) next; if(NF==1 && $1 ~ /^[0-9]+$/) {tc=$1; prev_edges=1; next}} END{print tc+0}' "$INPUT_DIR/m4_multi_traveler.txt" 2>/dev/null || echo 2)
-    # simpler: hardcode from file structure
     traveler_count=2
 
     set +e
-    run_sim_headless 10 "$INPUT_DIR/m4_multi_traveler.txt" "$logfile"
+    run_sim_headless_unbuffered 15 "$INPUT_DIR/m4_multi_traveler.txt" "$logfile"
     rc=$?
     set -e
 
-    started_count=$(grep -c '\[PID=[0-9]*\] started' "$logfile" 2>/dev/null || echo 0)
+    started_count=$(count_started_lines "$logfile")
+    started_count=${started_count:-0}
 
     if smoke_ok_rc "$rc" && ! log_crash_in_file "$logfile"; then
         pass "m4 smoke no crash"
@@ -361,7 +398,9 @@ if [ -x ./sim ]; then
         fail "m4 smoke crashed or bad exit (rc=$rc; see $logfile)"
     fi
 
-    if [ "${started_count:-0}" -eq "$traveler_count" ]; then
+    if grep -q 'No path found' "$logfile"; then
+        fail "m4 input has no path (see $logfile)"
+    elif [ "$started_count" -eq "$traveler_count" ]; then
         pass "m4 started lines count ($started_count == $traveler_count)"
     else
         fail "m4 started lines (found $started_count, expected $traveler_count; see $logfile)"
