@@ -1,6 +1,6 @@
 # Operating Systems Project
 
-Graph traffic simulation: load a directed weighted graph from a file, compute shortest paths with **Dijkstra**, and visualize the travelers with **Raylib** across milestones 1-5.
+Graph traffic simulation: load a directed weighted graph from a file, compute shortest paths with **Dijkstra**, and visualize the travelers with **Raylib** across milestones 1–6.
 
 ## Team
 
@@ -33,7 +33,7 @@ Plain text, ordered as follows:
 
 1. First line: `N M` — number of vertices (`N`), number of edges (`M`).
 2. Next `M` lines: `u v w` — directed edge from `u` to `v` with non-negative integer weight `w`. Vertices are `0 … N-1`.
-3. Next line: `T` — number of travelers (milestones 2–5).
+3. Next line: `T` — number of travelers (milestones 2–6).
 4. Next `T` lines: `source dest` — one source/destination pair per traveler.
 
 **Milestone 1 only:** step 3 is omitted; the file ends with a single `source dest` line.
@@ -68,7 +68,8 @@ make milestone2    # builds ./sim (GUI + graph + shortest-path animation)
 make milestone3    # same artifact as milestone2 (per assignment milestones)
 make milestone4    # builds ./sim for the multi-process GUI version
 make milestone5    # builds ./sim for the IPC version
-make all           # builds milestones 1-5
+make milestone6    # builds ./sim for node synchronization
+make all           # builds milestones 1-6
 make clean         # removes ./dijkstra, ./sim, and *.o
 ```
 
@@ -140,6 +141,30 @@ make milestone5
 
 ---
 
+## Milestone 6 – Node Synchronization
+
+Milestone 6 extends Milestone 5. Each traveler is a separate process created with `fork()`. Communication between children and the GUI still uses **pipes**; **synchronization** is implemented with **System V shared memory** and **POSIX semaphores** (`sem_init` with `pshared = 1`, one binary semaphore per graph node).
+
+Before entering a node, a traveler must acquire that node’s semaphore. The traveler stays inside the node for exactly **1 second**, then releases the semaphore with `sem_post()`. If the node is occupied, the traveler waits outside; the GUI shows it as an **orange hollow circle** with a **"W"**. FIFO entry order is not required.
+
+The parent prints runtime log lines for waiting, arrival, and completion:
+
+- `[PID=...] waiting outside node X`
+- `[PID=...] arrived at node X | next node: Y`
+- `[PID=...] arrived at node X | DESTINATION`
+- `[PID=...] finished`
+
+### Build and Run
+
+```bash
+make milestone6
+./sim inputs/tests/m6_three_waiting.txt
+```
+
+Click **PLAY** to start the travelers. Use `inputs/tests/m6_three_waiting.txt` to demonstrate multiple travelers competing for the same node.
+
+---
+
 ## Source layout (high level)
 
 | Component        | Role |
@@ -151,6 +176,7 @@ make milestone5
 | `src/main_GUI.c`      | Raylib GUI and milestone 3 timing / controls |
 | `src/multiple_GUI.c`  | Milestone 4 parent/children GUI with `fork()` |
 | `src/main_IPC.c`      | Milestone 5 IPC-based GUI using `pipe` |
+| `src/main_node_sync.c`| Milestone 6 node synchronization with shared memory and semaphores |
 
 ---
 
