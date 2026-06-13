@@ -143,21 +143,7 @@ int main(int argc, char* argv[]) {
         travelers[i].source = src[i];
         travelers[i].destination = dest[i];
         travelers[i].path_length = 0;
-
-        int preview_path[GUI_MAX_NODES];
-        int preview_path_length = 0;
-        if (!dijkstra_get_path(g,
-                               src[i],
-                               dest[i],
-                               preview_path,
-                               &preview_path_length,
-                               &travelers[i].total_distance)) {
-            printf("No path found\n");
-            free(data.source);
-            free(data.destination);
-            free_graph(g);
-            return 1;
-        }
+        travelers[i].total_distance = 0;
         travelers[i].position = positions[travelers[i].source];
         travelers[i].color = colors[i % 8];
 
@@ -166,9 +152,7 @@ int main(int argc, char* argv[]) {
         travelers[i].step_timer = 0.0f;
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
-        /* Trivial path: already at destination — show completion state immediately */
         travelers[i].finished = 0;
-        travelers[i].position = positions[travelers[i].source];
     }
 
     int pipes[traveler_count][2];
