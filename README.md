@@ -69,7 +69,7 @@ make milestone3    # same artifact as milestone2 (per assignment milestones)
 make milestone4    # builds ./sim for the multi-process GUI version
 make milestone5    # builds ./sim for the IPC version
 make milestone6    # builds ./sim for node synchronization
-make all           # builds milestones 1-5
+make all           # builds milestones 1-6
 make clean         # removes ./dijkstra, ./sim, and *.o
 ```
 

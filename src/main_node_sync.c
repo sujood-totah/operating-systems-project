@@ -388,7 +388,21 @@ int main(int argc, char* argv[]) {
                     float dy = to_pos.y - from_pos.y;
                     float dist = sqrtf(dx * dx + dy * dy);
 
-                    if (dist > 0) {
+                    if (dist == 0 && msg.next_node >= 0) {
+                        Vector2 next_pos = positions[msg.next_node];
+
+                        dx = next_pos.x - to_pos.x;
+                        dy = next_pos.y - to_pos.y;
+                        dist = sqrtf(dx * dx + dy * dy);
+
+                        if (dist > 0) {
+                            travelers[msg.traveler_id].position.x =
+                                to_pos.x + (dx / dist) * (NODE_RADIUS + 20);
+
+                            travelers[msg.traveler_id].position.y =
+                                to_pos.y + (dy / dist) * (NODE_RADIUS + 20);
+                        }
+                    } else if (dist > 0) {
                         float ratio = 0.85f;
 
                         travelers[msg.traveler_id].position.x = from_pos.x + dx * ratio;
