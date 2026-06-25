@@ -38,3 +38,12 @@ install-raylib:
 	cd /tmp/raylib/build && make
 	cd /tmp/raylib/build && sudo make install
 	sudo ldconfig
+
+# git checkout main 
+# git pull
+# git checkout -b exam_a/[מספר-תעודת-זהות]
+
+# git add .
+# git commit -m  "תיאור קצר של מה שעשית"
+# git push origin exam_a/[מספר-תעודת-זהות]
+
