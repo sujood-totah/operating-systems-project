@@ -585,6 +585,39 @@ int main(int argc, char* argv[]) {
     }
     printf("\n");
 
+    const char* scheduler_label;
+    switch (scheduler) {
+        case SCHED_FCFS:
+            scheduler_label = "FCFS";
+            break;
+        case SCHED_SJF:
+            scheduler_label = "SJF";
+            break;
+        case SCHED_PRIORITY:
+            scheduler_label = "Priority";
+            break;
+        case SCHED_RR:
+            scheduler_label = "RR";
+            break;
+        default:
+            scheduler_label = "Unknown";
+            break;
+    }
+
+    char scheduler_text[48];
+    snprintf(scheduler_text, sizeof(scheduler_text), "Scheduler: %s", scheduler_label);
+
+    char quantum_text[32];
+    const int show_quantum = (scheduler == SCHED_RR);
+    if (show_quantum) {
+        snprintf(quantum_text, sizeof(quantum_text), "Quantum: %d", quantum);
+    }
+
+    const int scheduler_info_font = 18;
+    const int scheduler_text_y = 68;
+    const int quantum_text_y = 86;
+    const int traveler_status_y = show_quantum ? 104 : 86;
+
     InitWindow(WIDTH, HEIGHT, "Graph GUI");
     SetTargetFPS(60);
     Rectangle playButton = {20, 20, 120, 40};
@@ -825,6 +858,12 @@ int main(int argc, char* argv[]) {
             BLACK
         );
 
+        DrawText(scheduler_text, 20, scheduler_text_y, scheduler_info_font, DARKGRAY);
+
+        if (show_quantum) {
+            DrawText(quantum_text, 20, quantum_text_y, scheduler_info_font, DARKGRAY);
+        }
+
         for (int t = 0; t < traveler_count; t++) {
             if (travelers[t].state == STATE_WAITING_OUTSIDE) {
                 DrawCircleLines(
@@ -888,7 +927,7 @@ int main(int argc, char* argv[]) {
                 travelers[t].finished ? " | finished" : ""
             );
 
-            DrawText(line, 20, 80 + t * 22, 18, DARKGRAY);
+            DrawText(line, 20, traveler_status_y + t * 22, 18, DARKGRAY);
         }
 
         EndDrawing();
