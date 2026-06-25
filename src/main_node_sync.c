@@ -29,6 +29,7 @@
 #define STATE_AT_NODE 1
 #define STATE_FINISHED 2
 #define WAITING_SLEEP_USEC 100000
+#define EDGE_WAIT_RATIO 0.85f
 
 
 typedef struct {
@@ -91,6 +92,57 @@ static void signal_active_travelers(const Traveler* travelers,
             kill(travelers[i].pid, signal_num);
         }
     }
+}
+
+static void set_waiting_outside_visual(Traveler* traveler,
+                                       const Vector2* positions,
+                                       int waiting_from_node,
+                                       int waiting_for_node,
+                                       int next_node) {
+    Vector2 from_pos = positions[waiting_from_node];
+    Vector2 to_pos = positions[waiting_for_node];
+
+    float dx = to_pos.x - from_pos.x;
+    float dy = to_pos.y - from_pos.y;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    if (dist == 0.0f && next_node >= 0) {
+        Vector2 next_pos = positions[next_node];
+
+        dx = next_pos.x - to_pos.x;
+        dy = next_pos.y - to_pos.y;
+        dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist > 0.0f) {
+            float offset = NODE_RADIUS + 20.0f;
+            traveler->position.x = to_pos.x + (dx / dist) * offset;
+            traveler->position.y = to_pos.y + (dy / dist) * offset;
+        }
+    } else if (dist > 0.0f) {
+        traveler->position.x = from_pos.x + dx * EDGE_WAIT_RATIO;
+        traveler->position.y = from_pos.y + dy * EDGE_WAIT_RATIO;
+    }
+}
+
+static void sync_traveler_at_node(Traveler* traveler,
+                                  const Vector2* positions,
+                                  int current_node) {
+    traveler->position = positions[current_node];
+    traveler->current_node = current_node;
+
+    int path_index = 0;
+    for (int k = 0; k < traveler->path_length; k++) {
+        if (traveler->path[k] == current_node) {
+            path_index = k;
+            break;
+        }
+    }
+
+    traveler->current_edge_index = path_index;
+    traveler->current_step = 0;
+    traveler->step_timer = 0.0f;
+    traveler->is_waiting = 1;
+    traveler->wait_timer = 0.0f;
 }
 
 static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
@@ -379,6 +431,10 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
+                if (travelers[i].state == STATE_WAITING_OUTSIDE) {
+                    continue;
+                }
+
                 if (travelers[i].is_waiting) {
                     travelers[i].wait_timer += delta;
 
@@ -441,11 +497,25 @@ int main(int argc, char* argv[]) {
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.state == STATE_WAITING_OUTSIDE) {
+                    set_waiting_outside_visual(
+                        &travelers[msg.traveler_id],
+                        positions,
+                        msg.waiting_from_node,
+                        msg.waiting_for_node,
+                        msg.next_node
+                    );
+
                     printf("[PID=%d] waiting outside node %d\n",
                            msg.pid,
                            msg.waiting_for_node);
 
                 } else if (msg.state == STATE_AT_NODE) {
+                    sync_traveler_at_node(
+                        &travelers[msg.traveler_id],
+                        positions,
+                        msg.current_node
+                    );
+
                     printf("[PID=%d] arrived at node %d | next node: %d\n",
                            msg.pid,
                            msg.current_node,
@@ -453,6 +523,7 @@ int main(int argc, char* argv[]) {
 
                 } else if (msg.state == STATE_FINISHED) {
                     travelers[msg.traveler_id].finished = 1;
+                    travelers[msg.traveler_id].position = positions[msg.current_node];
 
                     printf("[PID=%d] arrived at node %d | DESTINATION\n",
                            msg.pid,
@@ -575,12 +646,6 @@ int main(int argc, char* argv[]) {
 
         /* Draw all travelers */
         for (int t = 0; t < traveler_count; t++) {
-            DrawCircleV(
-                travelers[t].position,
-                12,
-                travelers[t].color
-            );
-
             if (travelers[t].state == STATE_WAITING_OUTSIDE) {
                 DrawCircleLines(
                     (int)travelers[t].position.x,
@@ -595,6 +660,12 @@ int main(int argc, char* argv[]) {
                     (int)travelers[t].position.y - 8,
                     18,
                     ORANGE
+                );
+            } else {
+                DrawCircleV(
+                    travelers[t].position,
+                    12,
+                    travelers[t].color
                 );
             }
 
