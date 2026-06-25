@@ -42,6 +42,7 @@ typedef struct {
     int is_waiting;
 
     int finished;
+    int child_finished;
     Vector2 position;
     Color color;
     pid_t pid;
@@ -58,7 +59,7 @@ static void signal_active_travelers(const Traveler* travelers,
                                     int traveler_count,
                                     int signal_num) {
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished && travelers[i].pid > 0) {
+        if (!travelers[i].finished && !travelers[i].child_finished && travelers[i].pid > 0) {
             kill(travelers[i].pid, signal_num);
         }
     }
@@ -177,6 +178,7 @@ int main(int argc, char* argv[]) {
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
         travelers[i].finished = (travelers[i].path_length <= 1);
+        travelers[i].child_finished = 0;
 
         travelers[i].position = positions[travelers[i].path[0]];
     }
@@ -351,7 +353,7 @@ int main(int argc, char* argv[]) {
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.finished) {
-                    travelers[msg.traveler_id].finished = 1;
+                    travelers[msg.traveler_id].child_finished = 1;
 
                     printf("[PID=%d] arrived at node %d | DESTINATION\n",
                            msg.pid,
@@ -534,7 +536,7 @@ int main(int argc, char* argv[]) {
 
     CloseWindow();
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished) {
+        if (!travelers[i].child_finished) {
             kill(travelers[i].pid, SIGCONT);
             kill(travelers[i].pid, SIGTERM);
         }

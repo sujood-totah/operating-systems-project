@@ -67,6 +67,7 @@ typedef struct {
     int is_waiting;
 
     int finished;
+    int child_finished;
     Vector2 position;
     Color color;
     pid_t pid;
@@ -88,10 +89,23 @@ static void signal_active_travelers(const Traveler* travelers,
                                     int traveler_count,
                                     int signal_num) {
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished && travelers[i].pid > 0) {
+        if (!travelers[i].finished && !travelers[i].child_finished && travelers[i].pid > 0) {
             kill(travelers[i].pid, signal_num);
         }
     }
+}
+
+static int get_edge_weight(graph* g, int from, int to) {
+    int weight = 1;
+    edge* curr = g->adjacency_list[from];
+    while (curr != NULL) {
+        if (curr->dest == to) {
+            weight = curr->weight;
+            break;
+        }
+        curr = curr->next;
+    }
+    return weight;
 }
 
 static void set_waiting_outside_visual(Traveler* traveler,
@@ -124,25 +138,90 @@ static void set_waiting_outside_visual(Traveler* traveler,
     }
 }
 
-static void sync_traveler_at_node(Traveler* traveler,
-                                  const Vector2* positions,
-                                  int current_node) {
-    traveler->position = positions[current_node];
-    traveler->current_node = current_node;
+static void apply_semaphore_waiting(Traveler* traveler,
+                                    graph* g,
+                                    const Vector2* positions,
+                                    const Message* msg) {
+    int from = msg->waiting_from_node;
+    int to = msg->waiting_for_node;
 
-    int path_index = 0;
-    for (int k = 0; k < traveler->path_length; k++) {
-        if (traveler->path[k] == current_node) {
-            path_index = k;
-            break;
+    traveler->waiting_for_node = to;
+    traveler->waiting_from_node = from;
+
+    if (from != to) {
+        for (int k = 0; k < traveler->path_length - 1; k++) {
+            if (traveler->path[k] == from && traveler->path[k + 1] == to) {
+                traveler->current_edge_index = k;
+                break;
+            }
+        }
+
+        int weight = get_edge_weight(g, from, to);
+        int waiting_step = (int)(EDGE_WAIT_RATIO * (float)weight);
+        if (waiting_step < 1) {
+            waiting_step = 1;
+        }
+        if (waiting_step >= weight) {
+            waiting_step = weight - 1;
+        }
+        if (weight > 1) {
+            traveler->current_step = waiting_step;
         }
     }
 
-    traveler->current_edge_index = path_index;
-    traveler->current_step = 0;
-    traveler->step_timer = 0.0f;
-    traveler->is_waiting = 1;
-    traveler->wait_timer = 0.0f;
+    set_waiting_outside_visual(traveler, positions, from, to, msg->next_node);
+}
+
+static void advance_traveler_animation(Traveler* traveler,
+                                       graph* g,
+                                       const Vector2* positions,
+                                       float delta) {
+    if (traveler->finished || traveler->path_length <= 1) {
+        return;
+    }
+
+    if (traveler->state == STATE_WAITING_OUTSIDE) {
+        return;
+    }
+
+    if (traveler->is_waiting) {
+        traveler->wait_timer += delta;
+
+        if (traveler->wait_timer >= 1.0f) {
+            traveler->wait_timer = 0.0f;
+            traveler->is_waiting = 0;
+        }
+        return;
+    }
+
+    int from = traveler->path[traveler->current_edge_index];
+    int to = traveler->path[traveler->current_edge_index + 1];
+    int weight = get_edge_weight(g, from, to);
+
+    traveler->step_timer += delta;
+
+    if (traveler->step_timer >= 0.3f) {
+        traveler->step_timer = 0.0f;
+        traveler->current_step++;
+
+        if (traveler->current_step >= weight) {
+            traveler->position = positions[to];
+            traveler->current_step = 0;
+            traveler->current_edge_index++;
+
+            if (traveler->current_edge_index >= traveler->path_length - 1) {
+                traveler->finished = 1;
+            } else {
+                traveler->is_waiting = 1;
+            }
+        } else {
+            float t = (float)traveler->current_step / (float)weight;
+            traveler->position.x =
+                positions[from].x + t * (positions[to].x - positions[from].x);
+            traveler->position.y =
+                positions[from].y + t * (positions[to].y - positions[from].y);
+        }
+    }
 }
 
 static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
@@ -255,6 +334,7 @@ int main(int argc, char* argv[]) {
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
         travelers[i].finished = (travelers[i].path_length <= 1);
+        travelers[i].child_finished = 0;
         travelers[i].state = STATE_AT_NODE;
         travelers[i].waiting_for_node = -1;
         travelers[i].waiting_from_node = -1;
@@ -427,60 +507,7 @@ int main(int argc, char* argv[]) {
             float delta = GetFrameTime();
 
             for (int i = 0; i < traveler_count; i++) {
-                if (travelers[i].finished || travelers[i].path_length <= 1) {
-                    continue;
-                }
-
-                if (travelers[i].state == STATE_WAITING_OUTSIDE) {
-                    continue;
-                }
-
-                if (travelers[i].is_waiting) {
-                    travelers[i].wait_timer += delta;
-
-                    if (travelers[i].wait_timer >= 1.0f) {
-                        travelers[i].wait_timer = 0.0f;
-                        travelers[i].is_waiting = 0;
-                    }
-                } else {
-                    int from = travelers[i].path[travelers[i].current_edge_index];
-                    int to = travelers[i].path[travelers[i].current_edge_index + 1];
-
-                    int weight = 1;
-                    edge* curr = g->adjacency_list[from];
-                    while (curr != NULL) {
-                        if (curr->dest == to) {
-                            weight = curr->weight;
-                            break;
-                        }
-                        curr = curr->next;
-                    }
-
-                    travelers[i].step_timer += delta;
-
-                    if (travelers[i].step_timer >= 0.3f) {
-                        travelers[i].step_timer = 0.0f;
-                        travelers[i].current_step++;
-
-                        if (travelers[i].current_step >= weight) {
-                            travelers[i].position = positions[to];
-                            travelers[i].current_step = 0;
-                            travelers[i].current_edge_index++;
-
-                            if (travelers[i].current_edge_index >= travelers[i].path_length - 1) {
-                                travelers[i].finished = 1;
-                            } else {
-                                travelers[i].is_waiting = 1;
-                            }
-                        } else {
-                            float t = (float)travelers[i].current_step / (float)weight;
-                            travelers[i].position.x =
-                                positions[from].x + t * (positions[to].x - positions[from].x);
-                            travelers[i].position.y =
-                                positions[from].y + t * (positions[to].y - positions[from].y);
-                        }
-                    }
-                }
+                advance_traveler_animation(&travelers[i], g, positions, delta);
             }
         }
 
@@ -497,12 +524,11 @@ int main(int argc, char* argv[]) {
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.state == STATE_WAITING_OUTSIDE) {
-                    set_waiting_outside_visual(
+                    apply_semaphore_waiting(
                         &travelers[msg.traveler_id],
+                        g,
                         positions,
-                        msg.waiting_from_node,
-                        msg.waiting_for_node,
-                        msg.next_node
+                        &msg
                     );
 
                     printf("[PID=%d] waiting outside node %d\n",
@@ -510,20 +536,13 @@ int main(int argc, char* argv[]) {
                            msg.waiting_for_node);
 
                 } else if (msg.state == STATE_AT_NODE) {
-                    sync_traveler_at_node(
-                        &travelers[msg.traveler_id],
-                        positions,
-                        msg.current_node
-                    );
-
                     printf("[PID=%d] arrived at node %d | next node: %d\n",
                            msg.pid,
                            msg.current_node,
                            msg.next_node);
 
                 } else if (msg.state == STATE_FINISHED) {
-                    travelers[msg.traveler_id].finished = 1;
-                    travelers[msg.traveler_id].position = positions[msg.current_node];
+                    travelers[msg.traveler_id].child_finished = 1;
 
                     printf("[PID=%d] arrived at node %d | DESTINATION\n",
                            msg.pid,
@@ -717,7 +736,7 @@ int main(int argc, char* argv[]) {
 
     CloseWindow();
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished) {
+        if (!travelers[i].child_finished) {
             kill(travelers[i].pid, SIGCONT);
             kill(travelers[i].pid, SIGTERM);
         }
