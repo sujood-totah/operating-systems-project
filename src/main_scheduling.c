@@ -227,6 +227,7 @@ static void apply_semaphore_waiting(Traveler* traveler,
 
     traveler->waiting_for_node = to;
     traveler->waiting_from_node = from;
+    traveler->finished = 0;
 
     if (from != to) {
         for (int k = 0; k < traveler->path_length - 1; k++) {
