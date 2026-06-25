@@ -100,52 +100,20 @@ static void signal_active_travelers(const Traveler* travelers,
 static int parse_scheduler_args(int argc,
                                 char* argv[],
                                 SchedulerType* scheduler,
-                                int* quantum,
                                 const char** input_path) {
-    if (argc < 4 || strcmp(argv[1], "-schd") != 0) {
+    if (argc != 4 || strcmp(argv[1], "-schd") != 0) {
         return 0;
     }
 
     if (strcmp(argv[2], "fcfs") == 0) {
-        if (argc != 4) {
-            return 0;
-        }
         *scheduler = SCHED_FCFS;
-        *quantum = 1;
         *input_path = argv[3];
         return 1;
     }
 
     if (strcmp(argv[2], "sjf") == 0) {
-        if (argc != 4) {
-            return 0;
-        }
         *scheduler = SCHED_SJF;
-        *quantum = 1;
         *input_path = argv[3];
-        return 1;
-    }
-
-    if (strcmp(argv[2], "priority") == 0) {
-        if (argc != 4) {
-            return 0;
-        }
-        *scheduler = SCHED_PRIORITY;
-        *quantum = 1;
-        *input_path = argv[3];
-        return 1;
-    }
-
-    if (strcmp(argv[2], "rr") == 0) {
-        if (argc != 5) {
-            return 0;
-        }
-        *scheduler = SCHED_RR;
-        *quantum = atoi(argv[3]);
-        if (*quantum <= 0) {
-            return 0;
-        }
-        *input_path = argv[4];
         return 1;
     }
 
@@ -156,22 +124,17 @@ static void dispatch_next_at_node(int node,
                                 NodeQueue* node_queues,
                                 int* node_busy,
                                 const pid_t* traveler_pids,
-                                SchedulerType scheduler,
-                                int quantum,
-                                int* rr_remaining) {
+                                SchedulerType scheduler) {
     if (node_busy[node]) {
         return;
     }
 
-    int selected = choose_next_traveler(&node_queues[node], scheduler, quantum);
+    int selected = choose_next_traveler(&node_queues[node], scheduler);
     if (selected < 0) {
         return;
     }
 
     node_busy[node] = 1;
-    if (scheduler == SCHED_RR) {
-        rr_remaining[selected] = quantum - 1;
-    }
     kill(traveler_pids[selected], SIGCONT);
 }
 
@@ -338,11 +301,12 @@ static void draw_arrow_colored(Vector2 start, Vector2 end, float thick, Color li
 
 int main(int argc, char* argv[]) {
     SchedulerType scheduler;
-    int quantum = 1;
     const char* input_path = NULL;
 
-    if (!parse_scheduler_args(argc, argv, &scheduler, &quantum, &input_path)) {
-        printf("Usage: ./sim -schd <fcfs|sjf|priority|rr> [quantum] <input_file>\n");
+    if (!parse_scheduler_args(argc, argv, &scheduler, &input_path)) {
+        printf("Usage:\n");
+        printf("  ./sim -schd fcfs <file_name>\n");
+        printf("  ./sim -schd sjf <file_name>\n");
         return 1;
     }
 
@@ -456,15 +420,10 @@ int main(int argc, char* argv[]) {
     NodeQueue node_queues[GUI_MAX_NODES];
     int node_busy[GUI_MAX_NODES] = {0};
     pid_t traveler_pids[traveler_count];
-    int rr_remaining[traveler_count];
     int arrival_counter = 0;
 
     for (int q = 0; q < GUI_MAX_NODES; q++) {
         init_queue(&node_queues[q]);
-    }
-
-    for (int i = 0; i < traveler_count; i++) {
-        rr_remaining[i] = 0;
     }
 
     for (int i = 0; i < traveler_count; i++) {
@@ -579,44 +538,14 @@ int main(int argc, char* argv[]) {
         traveler_pids[i] = pid;
     }
 
-    printf("Scheduler: %s", scheduler_name(scheduler));
-    if (scheduler == SCHED_RR) {
-        printf(" (quantum=%d)", quantum);
-    }
-    printf("\n");
-
-    const char* scheduler_label;
-    switch (scheduler) {
-        case SCHED_FCFS:
-            scheduler_label = "FCFS";
-            break;
-        case SCHED_SJF:
-            scheduler_label = "SJF";
-            break;
-        case SCHED_PRIORITY:
-            scheduler_label = "Priority";
-            break;
-        case SCHED_RR:
-            scheduler_label = "RR";
-            break;
-        default:
-            scheduler_label = "Unknown";
-            break;
-    }
+    printf("Scheduler: %s\n", scheduler_name(scheduler));
 
     char scheduler_text[48];
-    snprintf(scheduler_text, sizeof(scheduler_text), "Scheduler: %s", scheduler_label);
-
-    char quantum_text[32];
-    const int show_quantum = (scheduler == SCHED_RR);
-    if (show_quantum) {
-        snprintf(quantum_text, sizeof(quantum_text), "Quantum: %d", quantum);
-    }
+    snprintf(scheduler_text, sizeof(scheduler_text), "Scheduler: %s", scheduler_name(scheduler));
 
     const int scheduler_info_font = 18;
     const int scheduler_text_y = 68;
-    const int quantum_text_y = 86;
-    const int traveler_status_y = show_quantum ? 104 : 86;
+    const int traveler_status_y = 86;
 
     InitWindow(WIDTH, HEIGHT, "Graph GUI");
     SetTargetFPS(60);
@@ -666,7 +595,6 @@ int main(int argc, char* argv[]) {
                 if (msg.state == STATE_REQUEST_NODE) {
                     int node = msg.waiting_for_node;
                     int burst_time = msg.total_distance;
-                    int priority = msg.traveler_id;
                     int arrival_order = arrival_counter++;
 
                     travelers[msg.traveler_id].state = STATE_WAITING_OUTSIDE;
@@ -677,30 +605,17 @@ int main(int argc, char* argv[]) {
                         &msg
                     );
 
-                    if (scheduler == SCHED_RR && rr_remaining[msg.traveler_id] > 0) {
-                        prepend_to_queue(&node_queues[node],
-                                           msg.traveler_id,
-                                           node,
-                                           burst_time,
-                                           priority,
-                                           arrival_order);
-                        rr_remaining[msg.traveler_id]--;
-                    } else {
-                        add_to_queue(&node_queues[node],
-                                     msg.traveler_id,
-                                     node,
-                                     burst_time,
-                                     priority,
-                                     arrival_order);
-                    }
+                    add_to_queue(&node_queues[node],
+                                 msg.traveler_id,
+                                 node,
+                                 burst_time,
+                                 arrival_order);
 
                     dispatch_next_at_node(node,
                                           node_queues,
                                           node_busy,
                                           traveler_pids,
-                                          scheduler,
-                                          quantum,
-                                          rr_remaining);
+                                          scheduler);
 
                     printf("[PID=%d] requested node %d\n", msg.pid, node);
 
@@ -733,9 +648,7 @@ int main(int argc, char* argv[]) {
                                           node_queues,
                                           node_busy,
                                           traveler_pids,
-                                          scheduler,
-                                          quantum,
-                                          rr_remaining);
+                                          scheduler);
 
                     printf("[PID=%d] released node %d\n", msg.pid, node);
 
@@ -859,10 +772,6 @@ int main(int argc, char* argv[]) {
         );
 
         DrawText(scheduler_text, 20, scheduler_text_y, scheduler_info_font, DARKGRAY);
-
-        if (show_quantum) {
-            DrawText(quantum_text, 20, quantum_text_y, scheduler_info_font, DARKGRAY);
-        }
 
         for (int t = 0; t < traveler_count; t++) {
             if (travelers[t].state == STATE_WAITING_OUTSIDE) {
