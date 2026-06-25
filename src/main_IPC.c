@@ -42,6 +42,7 @@ typedef struct {
     int is_waiting;
 
     int finished;
+    int child_finished;
     Vector2 position;
     Color color;
     pid_t pid;
@@ -58,10 +59,19 @@ static void signal_active_travelers(const Traveler* travelers,
                                     int traveler_count,
                                     int signal_num) {
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished && travelers[i].pid > 0) {
+        if (!travelers[i].finished && !travelers[i].child_finished && travelers[i].pid > 0) {
             kill(travelers[i].pid, signal_num);
         }
     }
+}
+
+static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
+    for (int i = 0; i < path_len - 1; i++) {
+        if (path[i] == u && path[i + 1] == v) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void draw_arrow_colored(Vector2 start, Vector2 end, float thick, Color lineCol,
@@ -142,8 +152,23 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < traveler_count; i++) {
         travelers[i].source = src[i];
         travelers[i].destination = dest[i];
-        travelers[i].path_length = 0;
-        travelers[i].total_distance = 0;
+
+        int has_path = dijkstra_get_path(
+            g,
+            src[i],
+            dest[i],
+            travelers[i].path,
+            &travelers[i].path_length,
+            &travelers[i].total_distance
+        );
+        if (!has_path) {
+            printf("No path found\n");
+            free(data.source);
+            free(data.destination);
+            free_graph(g);
+            return 1;
+        }
+
         travelers[i].position = positions[travelers[i].source];
         travelers[i].color = colors[i % 8];
 
@@ -152,7 +177,10 @@ int main(int argc, char* argv[]) {
         travelers[i].step_timer = 0.0f;
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
-        travelers[i].finished = 0;
+        travelers[i].finished = (travelers[i].path_length <= 1);
+        travelers[i].child_finished = 0;
+
+        travelers[i].position = positions[travelers[i].path[0]];
     }
 
     int pipes[traveler_count][2];
@@ -259,10 +287,62 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        if (is_playing) {
+            float delta = GetFrameTime();
 
+            for (int i = 0; i < traveler_count; i++) {
+                if (travelers[i].finished || travelers[i].path_length <= 1) {
+                    continue;
+                }
 
+                if (travelers[i].is_waiting) {
+                    travelers[i].wait_timer += delta;
 
+                    if (travelers[i].wait_timer >= 1.0f) {
+                        travelers[i].wait_timer = 0.0f;
+                        travelers[i].is_waiting = 0;
+                    }
+                } else {
+                    int from = travelers[i].path[travelers[i].current_edge_index];
+                    int to = travelers[i].path[travelers[i].current_edge_index + 1];
 
+                    int weight = 1;
+                    edge* curr = g->adjacency_list[from];
+                    while (curr != NULL) {
+                        if (curr->dest == to) {
+                            weight = curr->weight;
+                            break;
+                        }
+                        curr = curr->next;
+                    }
+
+                    travelers[i].step_timer += delta;
+
+                    if (travelers[i].step_timer >= 0.3f) {
+                        travelers[i].step_timer = 0.0f;
+                        travelers[i].current_step++;
+
+                        if (travelers[i].current_step >= weight) {
+                            travelers[i].position = positions[to];
+                            travelers[i].current_step = 0;
+                            travelers[i].current_edge_index++;
+
+                            if (travelers[i].current_edge_index >= travelers[i].path_length - 1) {
+                                travelers[i].finished = 1;
+                            } else {
+                                travelers[i].is_waiting = 1;
+                            }
+                        } else {
+                            float t = (float)travelers[i].current_step / (float)weight;
+                            travelers[i].position.x =
+                                positions[from].x + t * (positions[to].x - positions[from].x);
+                            travelers[i].position.y =
+                                positions[from].y + t * (positions[to].y - positions[from].y);
+                        }
+                    }
+                }
+            }
+        }
 
         Message msg;
         for (int i = 0; i < traveler_count; i++) {
@@ -270,14 +350,10 @@ int main(int argc, char* argv[]) {
             ssize_t bytes = read(pipes[i][0], &msg, sizeof(Message));
 
             if (bytes > 0) {
-
-                travelers[msg.traveler_id].position =
-                    positions[msg.current_node];
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.finished) {
-
-                    travelers[msg.traveler_id].finished = 1;
+                    travelers[msg.traveler_id].child_finished = 1;
 
                     printf("[PID=%d] arrived at node %d | DESTINATION\n",
                            msg.pid,
@@ -286,7 +362,6 @@ int main(int argc, char* argv[]) {
                     printf("[PID=%d] finished\n", msg.pid);
 
                 } else {
-
                     printf("[PID=%d] arrived at node %d | next node: %d\n",
                            msg.pid,
                            msg.current_node,
@@ -317,10 +392,23 @@ int main(int argc, char* argv[]) {
                 end.x -= NODE_RADIUS * cosf(ang);
                 end.y -= NODE_RADIUS * sinf(ang);
 
+                int on_path = 0;
 
-                Color lineCol = LIGHTGRAY;
-                Color headCol = GRAY;
-                float thick = 2.0f;
+                for (int t = 0; t < traveler_count; t++) {
+                    if (edge_on_shortest_path(
+                            s,
+                            d,
+                            travelers[t].path,
+                            travelers[t].path_length
+                        )) {
+                        on_path = 1;
+                        break;
+                    }
+                }
+
+                Color lineCol = on_path ? DARKGREEN : LIGHTGRAY;
+                Color headCol = on_path ? GREEN : GRAY;
+                float thick = on_path ? 4.0f : 2.0f;
 
                 draw_arrow_colored(start, end, thick, lineCol, headCol);
 
@@ -337,7 +425,7 @@ int main(int argc, char* argv[]) {
                     midX - tw / 2,
                     midY - fontSize / 2,
                     fontSize,
-                    BLUE
+                    on_path ? DARKBLUE : BLUE
                     );
 
                 curr = curr->next;
@@ -448,7 +536,7 @@ int main(int argc, char* argv[]) {
 
     CloseWindow();
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished) {
+        if (!travelers[i].child_finished) {
             kill(travelers[i].pid, SIGCONT);
             kill(travelers[i].pid, SIGTERM);
         }

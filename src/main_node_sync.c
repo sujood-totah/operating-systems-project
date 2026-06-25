@@ -29,6 +29,7 @@
 #define STATE_AT_NODE 1
 #define STATE_FINISHED 2
 #define WAITING_SLEEP_USEC 100000
+#define EDGE_WAIT_RATIO 0.85f
 
 
 typedef struct {
@@ -66,6 +67,7 @@ typedef struct {
     int is_waiting;
 
     int finished;
+    int child_finished;
     Vector2 position;
     Color color;
     pid_t pid;
@@ -87,10 +89,148 @@ static void signal_active_travelers(const Traveler* travelers,
                                     int traveler_count,
                                     int signal_num) {
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished && travelers[i].pid > 0) {
+        if (!travelers[i].finished && !travelers[i].child_finished && travelers[i].pid > 0) {
             kill(travelers[i].pid, signal_num);
         }
     }
+}
+
+static int get_edge_weight(graph* g, int from, int to) {
+    int weight = 1;
+    edge* curr = g->adjacency_list[from];
+    while (curr != NULL) {
+        if (curr->dest == to) {
+            weight = curr->weight;
+            break;
+        }
+        curr = curr->next;
+    }
+    return weight;
+}
+
+static void set_waiting_outside_visual(Traveler* traveler,
+                                       const Vector2* positions,
+                                       int waiting_from_node,
+                                       int waiting_for_node,
+                                       int next_node) {
+    Vector2 from_pos = positions[waiting_from_node];
+    Vector2 to_pos = positions[waiting_for_node];
+
+    float dx = to_pos.x - from_pos.x;
+    float dy = to_pos.y - from_pos.y;
+    float dist = sqrtf(dx * dx + dy * dy);
+
+    if (dist == 0.0f && next_node >= 0) {
+        Vector2 next_pos = positions[next_node];
+
+        dx = next_pos.x - to_pos.x;
+        dy = next_pos.y - to_pos.y;
+        dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist > 0.0f) {
+            float offset = NODE_RADIUS + 20.0f;
+            traveler->position.x = to_pos.x + (dx / dist) * offset;
+            traveler->position.y = to_pos.y + (dy / dist) * offset;
+        }
+    } else if (dist > 0.0f) {
+        traveler->position.x = from_pos.x + dx * EDGE_WAIT_RATIO;
+        traveler->position.y = from_pos.y + dy * EDGE_WAIT_RATIO;
+    }
+}
+
+static void apply_semaphore_waiting(Traveler* traveler,
+                                    graph* g,
+                                    const Vector2* positions,
+                                    const Message* msg) {
+    int from = msg->waiting_from_node;
+    int to = msg->waiting_for_node;
+
+    traveler->waiting_for_node = to;
+    traveler->waiting_from_node = from;
+
+    if (from != to) {
+        for (int k = 0; k < traveler->path_length - 1; k++) {
+            if (traveler->path[k] == from && traveler->path[k + 1] == to) {
+                traveler->current_edge_index = k;
+                break;
+            }
+        }
+
+        int weight = get_edge_weight(g, from, to);
+        int waiting_step = (int)(EDGE_WAIT_RATIO * (float)weight);
+        if (waiting_step < 1) {
+            waiting_step = 1;
+        }
+        if (waiting_step >= weight) {
+            waiting_step = weight - 1;
+        }
+        if (weight > 1) {
+            traveler->current_step = waiting_step;
+        }
+    }
+
+    set_waiting_outside_visual(traveler, positions, from, to, msg->next_node);
+}
+
+static void advance_traveler_animation(Traveler* traveler,
+                                       graph* g,
+                                       const Vector2* positions,
+                                       float delta) {
+    if (traveler->finished || traveler->path_length <= 1) {
+        return;
+    }
+
+    if (traveler->state == STATE_WAITING_OUTSIDE) {
+        return;
+    }
+
+    if (traveler->is_waiting) {
+        traveler->wait_timer += delta;
+
+        if (traveler->wait_timer >= 1.0f) {
+            traveler->wait_timer = 0.0f;
+            traveler->is_waiting = 0;
+        }
+        return;
+    }
+
+    int from = traveler->path[traveler->current_edge_index];
+    int to = traveler->path[traveler->current_edge_index + 1];
+    int weight = get_edge_weight(g, from, to);
+
+    traveler->step_timer += delta;
+
+    if (traveler->step_timer >= 0.3f) {
+        traveler->step_timer = 0.0f;
+        traveler->current_step++;
+
+        if (traveler->current_step >= weight) {
+            traveler->position = positions[to];
+            traveler->current_step = 0;
+            traveler->current_edge_index++;
+
+            if (traveler->current_edge_index >= traveler->path_length - 1) {
+                traveler->finished = 1;
+            } else {
+                traveler->is_waiting = 1;
+            }
+        } else {
+            float t = (float)traveler->current_step / (float)weight;
+            traveler->position.x =
+                positions[from].x + t * (positions[to].x - positions[from].x);
+            traveler->position.y =
+                positions[from].y + t * (positions[to].y - positions[from].y);
+        }
+    }
+}
+
+static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
+    for (int i = 0; i < path_len - 1; i++) {
+        if (path[i] == u && path[i + 1] == v) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static void draw_arrow_colored(Vector2 start, Vector2 end, float thick, Color lineCol,
@@ -173,13 +313,11 @@ int main(int argc, char* argv[]) {
         travelers[i].destination = dest[i];
         travelers[i].path_length = 0;
 
-        int preview_path[GUI_MAX_NODES];
-        int preview_path_length = 0;
         if (!dijkstra_get_path(g,
                                src[i],
                                dest[i],
-                               preview_path,
-                               &preview_path_length,
+                               travelers[i].path,
+                               &travelers[i].path_length,
                                &travelers[i].total_distance)) {
             printf("No path found\n");
             free(data.source);
@@ -195,9 +333,14 @@ int main(int argc, char* argv[]) {
         travelers[i].step_timer = 0.0f;
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
-        /* Trivial path: already at destination — show completion state immediately */
-        travelers[i].finished = 0;
-        travelers[i].position = positions[travelers[i].source];
+        travelers[i].finished = (travelers[i].path_length <= 1);
+        travelers[i].child_finished = 0;
+        travelers[i].state = STATE_AT_NODE;
+        travelers[i].waiting_for_node = -1;
+        travelers[i].waiting_from_node = -1;
+        travelers[i].current_node = travelers[i].path[0];
+
+        travelers[i].position = positions[travelers[i].path[0]];
     }
 
     key_t key;
@@ -360,10 +503,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        if (is_playing) {
+            float delta = GetFrameTime();
 
-
-
-
+            for (int i = 0; i < traveler_count; i++) {
+                advance_traveler_animation(&travelers[i], g, positions, delta);
+            }
+        }
 
         Message msg;
         for (int i = 0; i < traveler_count; i++) {
@@ -371,49 +517,20 @@ int main(int argc, char* argv[]) {
             ssize_t bytes = read(pipes[i][0], &msg, sizeof(Message));
 
             if (bytes > 0) {
-
                 travelers[msg.traveler_id].state = msg.state;
                 travelers[msg.traveler_id].waiting_for_node = msg.waiting_for_node;
                 travelers[msg.traveler_id].waiting_from_node = msg.waiting_from_node;
                 travelers[msg.traveler_id].current_node = msg.current_node;
-
-                if (msg.state == STATE_WAITING_OUTSIDE) {
-                    int from = msg.waiting_from_node;
-                    int to = msg.waiting_for_node;
-
-                    Vector2 from_pos = positions[from];
-                    Vector2 to_pos = positions[to];
-
-                    float dx = to_pos.x - from_pos.x;
-                    float dy = to_pos.y - from_pos.y;
-                    float dist = sqrtf(dx * dx + dy * dy);
-
-                    if (dist == 0 && msg.next_node >= 0) {
-                        Vector2 next_pos = positions[msg.next_node];
-
-                        dx = next_pos.x - to_pos.x;
-                        dy = next_pos.y - to_pos.y;
-                        dist = sqrtf(dx * dx + dy * dy);
-
-                        if (dist > 0) {
-                            travelers[msg.traveler_id].position.x =
-                                to_pos.x + (dx / dist) * (NODE_RADIUS + 20);
-
-                            travelers[msg.traveler_id].position.y =
-                                to_pos.y + (dy / dist) * (NODE_RADIUS + 20);
-                        }
-                    } else if (dist > 0) {
-                        float ratio = 0.85f;
-
-                        travelers[msg.traveler_id].position.x = from_pos.x + dx * ratio;
-                        travelers[msg.traveler_id].position.y = from_pos.y + dy * ratio;
-                    }
-                } else {
-                    travelers[msg.traveler_id].position = positions[msg.current_node];
-                }
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.state == STATE_WAITING_OUTSIDE) {
+                    apply_semaphore_waiting(
+                        &travelers[msg.traveler_id],
+                        g,
+                        positions,
+                        &msg
+                    );
+
                     printf("[PID=%d] waiting outside node %d\n",
                            msg.pid,
                            msg.waiting_for_node);
@@ -425,7 +542,7 @@ int main(int argc, char* argv[]) {
                            msg.next_node);
 
                 } else if (msg.state == STATE_FINISHED) {
-                    travelers[msg.traveler_id].finished = 1;
+                    travelers[msg.traveler_id].child_finished = 1;
 
                     printf("[PID=%d] arrived at node %d | DESTINATION\n",
                            msg.pid,
@@ -458,10 +575,23 @@ int main(int argc, char* argv[]) {
                 end.x -= NODE_RADIUS * cosf(ang);
                 end.y -= NODE_RADIUS * sinf(ang);
 
+                int on_path = 0;
 
-                Color lineCol = LIGHTGRAY;
-                Color headCol = GRAY;
-                float thick = 2.0f;
+                for (int t = 0; t < traveler_count; t++) {
+                    if (edge_on_shortest_path(
+                            s,
+                            d,
+                            travelers[t].path,
+                            travelers[t].path_length
+                        )) {
+                        on_path = 1;
+                        break;
+                    }
+                }
+
+                Color lineCol = on_path ? DARKGREEN : LIGHTGRAY;
+                Color headCol = on_path ? GREEN : GRAY;
+                float thick = on_path ? 4.0f : 2.0f;
 
                 draw_arrow_colored(start, end, thick, lineCol, headCol);
 
@@ -478,7 +608,7 @@ int main(int argc, char* argv[]) {
                     midX - tw / 2,
                     midY - fontSize / 2,
                     fontSize,
-                    BLUE
+                    on_path ? DARKBLUE : BLUE
                     );
 
                 curr = curr->next;
@@ -535,7 +665,6 @@ int main(int argc, char* argv[]) {
 
         /* Draw all travelers */
         for (int t = 0; t < traveler_count; t++) {
-
             if (travelers[t].state == STATE_WAITING_OUTSIDE) {
                 DrawCircleLines(
                     (int)travelers[t].position.x,
@@ -607,7 +736,7 @@ int main(int argc, char* argv[]) {
 
     CloseWindow();
     for (int i = 0; i < traveler_count; i++) {
-        if (!travelers[i].finished) {
+        if (!travelers[i].child_finished) {
             kill(travelers[i].pid, SIGCONT);
             kill(travelers[i].pid, SIGTERM);
         }
