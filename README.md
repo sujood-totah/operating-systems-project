@@ -1,6 +1,6 @@
 # Operating Systems Project
 
-Graph traffic simulation: load a directed weighted graph from a file, compute shortest paths with **Dijkstra**, and visualize the travelers with **Raylib** across milestones 1–6.
+Graph traffic simulation: load a directed weighted graph from a file, compute shortest paths with **Dijkstra**, and visualize the travelers with **Raylib** across milestones 1–7.
 
 ## Team
 
@@ -33,7 +33,7 @@ Plain text, ordered as follows:
 
 1. First line: `N M` — number of vertices (`N`), number of edges (`M`).
 2. Next `M` lines: `u v w` — directed edge from `u` to `v` with non-negative integer weight `w`. Vertices are `0 … N-1`.
-3. Next line: `T` — number of travelers (milestones 2–6).
+3. Next line: `T` — number of travelers (milestones 2–7).
 4. Next `T` lines: `source dest` — one source/destination pair per traveler.
 
 **Milestone 1 only:** step 3 is omitted; the file ends with a single `source dest` line.
@@ -69,7 +69,8 @@ make milestone3    # same artifact as milestone2 (per assignment milestones)
 make milestone4    # builds ./sim for the multi-process GUI version
 make milestone5    # builds ./sim for the IPC version
 make milestone6    # builds ./sim for node synchronization
-make all           # builds milestones 1-6
+make milestone7    # builds ./sim for process scheduling
+make all           # builds milestones 1-7
 make clean         # removes ./dijkstra, ./sim, and *.o
 ```
 
@@ -165,6 +166,119 @@ Click **PLAY** to start the travelers. Use `inputs/tests/m6_three_waiting.txt` t
 
 ---
 
+## Milestone 7 – Process Scheduling
+
+### Overview
+
+Milestone 7 extends Milestone 6 by introducing **process scheduling** for travelers entering intersections (graph nodes). When several travelers are waiting to enter the same node, the **scheduler** decides which one is allowed to continue, according to the selected scheduling algorithm.
+
+All Milestone 6 behavior is preserved: **IPC** (pipes), **shared memory**, **semaphore synchronization**, **GUI animation**, **shortest-path highlighting**, **waiting visualization (W)**, and **visual completion** separated from child-process completion.
+
+### Features
+
+- Scheduling integrated with the existing Milestone 6 implementation.
+- Supports multiple scheduling algorithms (FCFS, SJF, Priority, Round Robin).
+- Scheduling decisions are made when multiple travelers are waiting to enter the **same node**.
+- IPC communication remains unchanged (anonymous `pipe` per traveler).
+- Semaphore synchronization remains unchanged (one binary semaphore per node in shared memory).
+- GUI continues using Milestone 4-style, weight-based animation.
+- Waiting visualization (**W**, orange hollow circle) is preserved.
+- Visual completion (`finished`) is separated from child-process completion (`child_finished`).
+
+### Supported Scheduling Algorithms
+
+#### FCFS (First Come First Served)
+
+- Travelers are scheduled in **arrival order** at each node.
+- The first traveler to request a node is the first to be granted access when the node becomes free.
+
+#### SJF (Shortest Job First)
+
+- **Execution time** is represented by the total shortest-path distance calculated by Dijkstra.
+- `burst_time = total_distance` (sum of edge weights on the shortest path).
+- The traveler with the **smallest** `total_distance` is selected first.
+- `arrival_order` is used as a tie-breaker when two travelers have the same burst time.
+
+#### Priority
+
+- **Lower traveler ID** has higher priority (traveler 0 before traveler 1, and so on).
+- `arrival_order` breaks ties when two travelers have the same priority.
+
+#### Round Robin
+
+- Travelers are scheduled in **FIFO** order at each node.
+- A **quantum** is supplied from the command line.
+- After consuming its quantum, the traveler is placed at the **end** of the waiting queue for that node.
+
+### Command Line Usage
+
+```bash
+make milestone7
+
+./sim -schd fcfs inputs/tests/m6_three_waiting.txt
+./sim -schd sjf inputs/tests/m6_three_waiting.txt
+./sim -schd priority inputs/tests/m6_three_waiting.txt
+./sim -schd rr 2 inputs/tests/m6_three_waiting.txt
+```
+
+The general form is:
+
+```bash
+./sim -schd <fcfs|sjf|priority|rr> [quantum] <input_file>
+```
+
+For **Round Robin**, the **quantum** argument is required immediately after `rr` (e.g. `rr 2` means each traveler may enter up to 2 nodes per scheduling turn before being moved to the end of the queue). FCFS, SJF, and Priority do not take a quantum argument.
+
+Click **PLAY** to start the travelers after the window opens.
+
+### Internal Design
+
+| File | Role |
+|------|------|
+| `src/scheduler.h` | Scheduler types, per-node queue API, `choose_next_traveler()` |
+| `src/scheduler.c` | FCFS, SJF, Priority, and Round Robin selection logic |
+| `src/main_scheduling.c` | Milestone 6 base + scheduling IPC, CLI parsing, and GUI |
+
+Key concepts:
+
+- **Per-node waiting queues** — each graph node has its own queue of travelers waiting for scheduler dispatch.
+- **`burst_time`** — stored per queued traveler; set from `total_distance` (Dijkstra shortest-path cost). Used by SJF.
+- **`arrival_order`** — monotonic counter assigned when a traveler requests a node; used by FCFS and as a tie-breaker for SJF and Priority.
+- **`child_finished` vs `finished`** — the child sets `child_finished` when it reaches the destination; the GUI sets `finished` only when the animation visually arrives at the destination node.
+- **SIGSTOP / SIGCONT** — before attempting to enter a node, each child sends a request and raises **SIGSTOP**; the parent scheduler chooses the next traveler and sends **SIGCONT** to grant access.
+
+### GUI
+
+The Milestone 7 GUI displays:
+
+- **Selected scheduler** (e.g. `Scheduler: FCFS`, `Scheduler: SJF`, `Scheduler: Priority`, `Scheduler: RR`) — shown permanently below the PLAY/STOP button.
+- **Quantum** (Round Robin only, e.g. `Quantum: 2`).
+- **Traveler status** lines (`T0: source -> dest | distance: …`, with `| finished` when the animation completes).
+- **Waiting indicator (W)** — orange hollow circle when a traveler waits outside an occupied node.
+- **Shortest path highlighting** — path edges drawn in green; other edges in gray.
+- **Weight-based traveler animation** — movement speed follows edge weights (Milestone 4 style).
+
+### Testing
+
+Milestone 7 was tested manually with `inputs/tests/m6_three_waiting.txt` and other multi-traveler inputs:
+
+| Area | What was verified |
+|------|-------------------|
+| **FCFS** | Travelers granted access in request order at contested nodes |
+| **SJF** | Shorter `total_distance` travelers scheduled before longer ones |
+| **Priority** | Lower traveler ID scheduled before higher ID at the same node |
+| **Round Robin** | FIFO rotation with configurable quantum; travelers re-queued after quantum expires |
+| **Multiple travelers** | Concurrent animation and logging for all travelers |
+| **Semaphore waiting** | Only one traveler inside a node at a time; others wait outside |
+| **GUI animation** | Weight-based movement, PLAY/STOP, path highlighting |
+| **Visual completion** | `| finished` and “All travelers arrived!” appear only after dots reach destination visually |
+
+### Notes
+
+Milestone 7 builds directly on Milestone 6 and does **not** replace any previous functionality. Milestones 1–6 remain available via their respective `make` targets.
+
+---
+
 ## Source layout (high level)
 
 | Component        | Role |
@@ -177,6 +291,9 @@ Click **PLAY** to start the travelers. Use `inputs/tests/m6_three_waiting.txt` t
 | `src/multiple_GUI.c`  | Milestone 4 parent/children GUI with `fork()` |
 | `src/main_IPC.c`      | Milestone 5 IPC-based GUI using `pipe` |
 | `src/main_node_sync.c`| Milestone 6 node synchronization with shared memory and semaphores |
+| `src/scheduler.h`     | Milestone 7 scheduler types and queue API |
+| `src/scheduler.c`     | Milestone 7 FCFS / SJF / Priority / Round Robin logic |
+| `src/main_scheduling.c`| Milestone 7 scheduling GUI and process dispatch |
 
 ---
 
