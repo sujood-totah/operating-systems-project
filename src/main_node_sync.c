@@ -93,6 +93,15 @@ static void signal_active_travelers(const Traveler* travelers,
     }
 }
 
+static int edge_on_shortest_path(int u, int v, const int* path, int path_len) {
+    for (int i = 0; i < path_len - 1; i++) {
+        if (path[i] == u && path[i + 1] == v) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void draw_arrow_colored(Vector2 start, Vector2 end, float thick, Color lineCol,
                                Color headCol) {
     DrawLineEx(start, end, thick, lineCol);
@@ -173,13 +182,11 @@ int main(int argc, char* argv[]) {
         travelers[i].destination = dest[i];
         travelers[i].path_length = 0;
 
-        int preview_path[GUI_MAX_NODES];
-        int preview_path_length = 0;
         if (!dijkstra_get_path(g,
                                src[i],
                                dest[i],
-                               preview_path,
-                               &preview_path_length,
+                               travelers[i].path,
+                               &travelers[i].path_length,
                                &travelers[i].total_distance)) {
             printf("No path found\n");
             free(data.source);
@@ -195,9 +202,13 @@ int main(int argc, char* argv[]) {
         travelers[i].step_timer = 0.0f;
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
-        /* Trivial path: already at destination — show completion state immediately */
-        travelers[i].finished = 0;
-        travelers[i].position = positions[travelers[i].source];
+        travelers[i].finished = (travelers[i].path_length <= 1);
+        travelers[i].state = STATE_AT_NODE;
+        travelers[i].waiting_for_node = -1;
+        travelers[i].waiting_from_node = -1;
+        travelers[i].current_node = travelers[i].path[0];
+
+        travelers[i].position = positions[travelers[i].path[0]];
     }
 
     key_t key;
@@ -360,10 +371,62 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        if (is_playing) {
+            float delta = GetFrameTime();
 
+            for (int i = 0; i < traveler_count; i++) {
+                if (travelers[i].finished || travelers[i].path_length <= 1) {
+                    continue;
+                }
 
+                if (travelers[i].is_waiting) {
+                    travelers[i].wait_timer += delta;
 
+                    if (travelers[i].wait_timer >= 1.0f) {
+                        travelers[i].wait_timer = 0.0f;
+                        travelers[i].is_waiting = 0;
+                    }
+                } else {
+                    int from = travelers[i].path[travelers[i].current_edge_index];
+                    int to = travelers[i].path[travelers[i].current_edge_index + 1];
 
+                    int weight = 1;
+                    edge* curr = g->adjacency_list[from];
+                    while (curr != NULL) {
+                        if (curr->dest == to) {
+                            weight = curr->weight;
+                            break;
+                        }
+                        curr = curr->next;
+                    }
+
+                    travelers[i].step_timer += delta;
+
+                    if (travelers[i].step_timer >= 0.3f) {
+                        travelers[i].step_timer = 0.0f;
+                        travelers[i].current_step++;
+
+                        if (travelers[i].current_step >= weight) {
+                            travelers[i].position = positions[to];
+                            travelers[i].current_step = 0;
+                            travelers[i].current_edge_index++;
+
+                            if (travelers[i].current_edge_index >= travelers[i].path_length - 1) {
+                                travelers[i].finished = 1;
+                            } else {
+                                travelers[i].is_waiting = 1;
+                            }
+                        } else {
+                            float t = (float)travelers[i].current_step / (float)weight;
+                            travelers[i].position.x =
+                                positions[from].x + t * (positions[to].x - positions[from].x);
+                            travelers[i].position.y =
+                                positions[from].y + t * (positions[to].y - positions[from].y);
+                        }
+                    }
+                }
+            }
+        }
 
         Message msg;
         for (int i = 0; i < traveler_count; i++) {
@@ -371,46 +434,10 @@ int main(int argc, char* argv[]) {
             ssize_t bytes = read(pipes[i][0], &msg, sizeof(Message));
 
             if (bytes > 0) {
-
                 travelers[msg.traveler_id].state = msg.state;
                 travelers[msg.traveler_id].waiting_for_node = msg.waiting_for_node;
                 travelers[msg.traveler_id].waiting_from_node = msg.waiting_from_node;
                 travelers[msg.traveler_id].current_node = msg.current_node;
-
-                if (msg.state == STATE_WAITING_OUTSIDE) {
-                    int from = msg.waiting_from_node;
-                    int to = msg.waiting_for_node;
-
-                    Vector2 from_pos = positions[from];
-                    Vector2 to_pos = positions[to];
-
-                    float dx = to_pos.x - from_pos.x;
-                    float dy = to_pos.y - from_pos.y;
-                    float dist = sqrtf(dx * dx + dy * dy);
-
-                    if (dist == 0 && msg.next_node >= 0) {
-                        Vector2 next_pos = positions[msg.next_node];
-
-                        dx = next_pos.x - to_pos.x;
-                        dy = next_pos.y - to_pos.y;
-                        dist = sqrtf(dx * dx + dy * dy);
-
-                        if (dist > 0) {
-                            travelers[msg.traveler_id].position.x =
-                                to_pos.x + (dx / dist) * (NODE_RADIUS + 20);
-
-                            travelers[msg.traveler_id].position.y =
-                                to_pos.y + (dy / dist) * (NODE_RADIUS + 20);
-                        }
-                    } else if (dist > 0) {
-                        float ratio = 0.85f;
-
-                        travelers[msg.traveler_id].position.x = from_pos.x + dx * ratio;
-                        travelers[msg.traveler_id].position.y = from_pos.y + dy * ratio;
-                    }
-                } else {
-                    travelers[msg.traveler_id].position = positions[msg.current_node];
-                }
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.state == STATE_WAITING_OUTSIDE) {
@@ -458,10 +485,23 @@ int main(int argc, char* argv[]) {
                 end.x -= NODE_RADIUS * cosf(ang);
                 end.y -= NODE_RADIUS * sinf(ang);
 
+                int on_path = 0;
 
-                Color lineCol = LIGHTGRAY;
-                Color headCol = GRAY;
-                float thick = 2.0f;
+                for (int t = 0; t < traveler_count; t++) {
+                    if (edge_on_shortest_path(
+                            s,
+                            d,
+                            travelers[t].path,
+                            travelers[t].path_length
+                        )) {
+                        on_path = 1;
+                        break;
+                    }
+                }
+
+                Color lineCol = on_path ? DARKGREEN : LIGHTGRAY;
+                Color headCol = on_path ? GREEN : GRAY;
+                float thick = on_path ? 4.0f : 2.0f;
 
                 draw_arrow_colored(start, end, thick, lineCol, headCol);
 
@@ -478,7 +518,7 @@ int main(int argc, char* argv[]) {
                     midX - tw / 2,
                     midY - fontSize / 2,
                     fontSize,
-                    BLUE
+                    on_path ? DARKBLUE : BLUE
                     );
 
                 curr = curr->next;
@@ -535,6 +575,11 @@ int main(int argc, char* argv[]) {
 
         /* Draw all travelers */
         for (int t = 0; t < traveler_count; t++) {
+            DrawCircleV(
+                travelers[t].position,
+                12,
+                travelers[t].color
+            );
 
             if (travelers[t].state == STATE_WAITING_OUTSIDE) {
                 DrawCircleLines(
@@ -550,12 +595,6 @@ int main(int argc, char* argv[]) {
                     (int)travelers[t].position.y - 8,
                     18,
                     ORANGE
-                );
-            } else {
-                DrawCircleV(
-                    travelers[t].position,
-                    12,
-                    travelers[t].color
                 );
             }
 
