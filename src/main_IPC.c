@@ -184,8 +184,10 @@ int main(int argc, char* argv[]) {
     }
 
     int pipes[traveler_count][2];
+    int  ack_pipes[traveler_count][2];
     for (int i = 0; i < traveler_count; i++) {
         pipe(pipes[i]);
+        pipe(ack_pipes[i]);
         pid_t pid = fork();
 
         if (pid < 0) {
@@ -243,17 +245,23 @@ int main(int argc, char* argv[]) {
                 }
 
                 write(pipes[i][1], &msg, sizeof(Message));
+                char ack;
+                printf(("waiting for ACK..\n"));
+                read(ack_pipes[i][0],&ack,1);
+                printf("ACK received\n");
 
                 if (!msg.finished) {
                     sleep(1);
                 }
             }
 
-            close(pipes[i][1]);
+            close(pipes[i][0]);
+            close(ack_pipes[i][1]);
             exit(0);
         }
 
         close(pipes[i][1]);
+        close(ack_pipes[i][0]);
         fcntl(pipes[i][0], F_SETFL, O_NONBLOCK);
         travelers[i].pid = pid;
     }
@@ -350,6 +358,9 @@ int main(int argc, char* argv[]) {
             ssize_t bytes = read(pipes[i][0], &msg, sizeof(Message));
 
             if (bytes > 0) {
+                char ack = 'A';
+                write(ack_pipes[i][1], &ack, 1);
+
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.finished) {
