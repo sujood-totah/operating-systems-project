@@ -24,6 +24,7 @@ typedef struct {
     int next_node;
     int finished;
     int total_distance;
+    int no_path;
 } Message;
 
 typedef struct {
@@ -161,13 +162,6 @@ int main(int argc, char* argv[]) {
             &travelers[i].path_length,
             &travelers[i].total_distance
         );
-        if (!has_path) {
-            printf("No path found\n");
-            free(data.source);
-            free(data.destination);
-            free_graph(g);
-            return 1;
-        }
 
         travelers[i].position = positions[travelers[i].source];
         travelers[i].color = colors[i % 8];
@@ -177,10 +171,17 @@ int main(int argc, char* argv[]) {
         travelers[i].step_timer = 0.0f;
         travelers[i].wait_timer = 0.0f;
         travelers[i].is_waiting = 0;
-        travelers[i].finished = (travelers[i].path_length <= 1);
         travelers[i].child_finished = 0;
 
-        travelers[i].position = positions[travelers[i].path[0]];
+        if (!has_path) {
+            travelers[i].path_length = 0;
+            travelers[i].total_distance = -1;
+            travelers[i].finished = 0;
+            travelers[i].position = positions[src[i]];
+        } else {
+            travelers[i].finished = (travelers[i].path_length <= 1);
+            travelers[i].position = positions[travelers[i].path[0]];
+        }
     }
 
     int pipes[traveler_count][2];
@@ -202,19 +203,6 @@ int main(int argc, char* argv[]) {
             int child_total_distance = 0;
             struct sigaction sa;
 
-            int has_path = dijkstra_get_path(
-                           g,
-                           src[i],
-                           dest[i],
-                           child_path,
-                           &child_path_length,
-                           &child_total_distance
-                       );
-            if (!has_path) {
-                close(pipes[i][1]);
-                exit(1);
-            }
-
             child_can_run = 0;
             sigemptyset(&sa.sa_mask);
             sa.sa_flags = 0;
@@ -225,6 +213,32 @@ int main(int argc, char* argv[]) {
                 pause();
             }
 
+            int has_path = dijkstra_get_path(
+                g,
+                src[i],
+                dest[i],
+                child_path,
+                &child_path_length,
+                &child_total_distance
+            );
+
+            if (!has_path) {
+                Message msg;
+
+                msg.pid = getpid();
+                msg.traveler_id = i;
+                msg.current_node = src[i];
+                msg.next_node = dest[i];
+                msg.finished = 1;
+                msg.total_distance = -1;
+                msg.no_path = 1;
+
+                write(pipes[i][1], &msg, sizeof(Message));
+
+                close(pipes[i][1]);
+                exit(0);
+            }
+
             Message msg;
 
             for (int j = 0; j < child_path_length; j++) {
@@ -233,6 +247,7 @@ int main(int argc, char* argv[]) {
                 msg.traveler_id = i;
                 msg.current_node = child_path[j];
                 msg.total_distance = child_total_distance;
+                msg.no_path = 0;
 
                 if (j == child_path_length - 1) {
                     msg.next_node = -1;
@@ -350,6 +365,20 @@ int main(int argc, char* argv[]) {
             ssize_t bytes = read(pipes[i][0], &msg, sizeof(Message));
 
             if (bytes > 0) {
+                if (msg.no_path) {
+                    printf("[PID=%d] traveler %d has no path from %d to %d\n",
+                           msg.pid,
+                           msg.traveler_id,
+                           msg.current_node,
+                           msg.next_node);
+
+                    travelers[msg.traveler_id].finished = 1;
+                    travelers[msg.traveler_id].child_finished = 1;
+                    travelers[msg.traveler_id].total_distance = -1;
+
+                    continue;
+                }
+
                 travelers[msg.traveler_id].total_distance = msg.total_distance;
 
                 if (msg.finished) {
